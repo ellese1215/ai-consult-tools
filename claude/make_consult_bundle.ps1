@@ -281,7 +281,18 @@ function Resolve-ConsultConfigPath([string]$repoFull, [string]$configPath) {
     }
 
     $candidatesText = ($DefaultConfigRelCandidates -join ', ')
-    throw "consult config not found. Specify -ConfigPath or create one of: $candidatesText. You can copy ai-consult-tools\claude\consult.config.example.json as a starting point."
+    Write-Host "" 
+    Write-Host "エラー: consult.config.json が見つかりません。" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "以下のいずれかを実行してください：" -ForegroundColor Yellow
+    Write-Host "  1. consult.config.example.json をコピーして consult.config.json を作成する"
+    Write-Host "     例: Copy-Item ai-consult-tools\claude\consult.config.example.json ai-consult-tools\claude\consult.config.json"
+    Write-Host "  2. -ConfigPath オプションで設定ファイルのパスを明示する"
+    Write-Host "     例: -ConfigPath \"ai-consult-tools\claude\consult.config.json\""
+    Write-Host ""
+    Write-Host "探索したパス: $candidatesText" -ForegroundColor Gray
+    Write-Host ""
+    throw "consult config not found. Specify -ConfigPath or create one of: $candidatesText."
 }
 
 function Apply-ConsultConfig([string]$repoFull, [string]$configPath) {

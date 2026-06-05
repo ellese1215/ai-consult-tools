@@ -19,7 +19,7 @@ AIへの「推測による回答」を構造的に防ぎ、コードとドキュ
 ## ファイル構成
 
 ```
-ai-consult-ai-consult-tools/claude/
+ai-consult-tools/claude/
 ├── make_consult_bundle.ps1       # バンドル生成スクリプト（本体）
 ├── consult.config.json           # 除外ルール等の設定（あなたの環境向けに編集）
 ├── consult.config.example.json   # 設定ファイルのテンプレート
@@ -27,6 +27,7 @@ ai-consult-ai-consult-tools/claude/
 ├── 01_make_consult_bundle_spec.md    # スクリプト技術仕様
 ├── 02_consult_template.md            # スレッド開始テンプレート
 ├── 03_claude_session_guide.md        # セッション開始手順・モード選択ガイド
+├── consult.local.example.md         # プロジェクト固有設定のテンプレート
 ├── SECURITY.md                       # セキュリティ・取り扱い注意事項
 └── consult_case/                     # 生成物の出力先（Git管理外推奨）
 ```
@@ -47,11 +48,11 @@ ai-consult-ai-consult-tools/claude/
 
 ### 1. ファイルを配置する
 
-`ai-consult-ai-consult-tools/claude/` ディレクトリをリポジトリルート配下に配置してください。
+`ai-consult-tools/claude/` ディレクトリをリポジトリルート配下に配置してください。
 
 ```
 your-repo/
-└── tools/
+└── ai-consult-tools/
     └── claude/
         ├── make_consult_bundle.ps1
         ├── consult.config.json   ← consult.config.example.json をコピーして編集
@@ -63,7 +64,7 @@ your-repo/
 `consult.config.example.json` をコピーして `consult.config.json` を作成し、あなたの環境に合わせて編集してください。
 
 ```powershell
-Copy-Item ai-consult-ai-consult-tools\claude\consult.config.example.json ai-consult-ai-consult-tools\claude\consult.config.json
+Copy-Item ai-consult-tools\claude\consult.config.example.json ai-consult-tools\claude\consult.config.json
 ```
 
 主な設定項目：
@@ -78,12 +79,22 @@ Copy-Item ai-consult-ai-consult-tools\claude\consult.config.example.json ai-cons
 
 詳細は `consult.config.example.json` のコメントおよび `SECURITY.md` を参照してください。
 
-### 3. consult_case/ をGit管理外にする
+### 3. consult.local.md を作成する
+
+`consult.local.example.md` をコピーして `consult.local.md` を作成し、ビルドコマンド等を記載してください。
+
+```powershell
+Copy-Item ai-consult-tools\claude\consult.local.example.md ai-consult-tools\claude\consult.local.md
+```
+
+`consult.local.md` はGit管理外のため、コミットされません。スレッド開始時のinclude bundleに含めることで、AIがビルドコマンドを推測なく把握できます。
+
+### 4. consult_case/ をGit管理外にする
 
 生成物（バンドルMD）はAIへの一時的な添付物であり、Git管理不要です。`.gitignore` に追加することを推奨します。
 
 ```
-ai-consult-ai-consult-tools/claude/consult_case/
+ai-consult-tools/claude/consult_case/
 ```
 
 ---
@@ -97,7 +108,7 @@ ai-consult-ai-consult-tools/claude/consult_case/
 まず全体の構造を把握するために使います。本文は含まず、ファイル一覧・ツリーのみを出力します。
 
 ```powershell
-pwsh -File ai-consult-ai-consult-tools\claude\make_consult_bundle.ps1 -Mode map -RepoRoot "C:\your-repo"
+pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode map -RepoRoot "C:\your-repo"
 ```
 
 ### Mode: include（範囲指定スナップショット）
@@ -106,10 +117,10 @@ pwsh -File ai-consult-ai-consult-tools\claude\make_consult_bundle.ps1 -Mode map 
 
 ```powershell
 # フォルダ指定
-pwsh -File ai-consult-ai-consult-tools\claude\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\your-repo" -IncludePaths "src\controllers"
+pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\your-repo" -IncludePaths "src\controllers"
 
 # 複数ファイル指定
-pwsh -File ai-consult-ai-consult-tools\claude\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\your-repo" -IncludePaths "src\App.php","src\Config.php"
+pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\your-repo" -IncludePaths "src\App.php","src\Config.php"
 ```
 
 ### Mode: diff（差分バンドル）
@@ -118,13 +129,13 @@ Gitの差分（HEAD vs 作業ツリー）を出力します。修正後のレビ
 
 ```powershell
 # 未コミット差分（既定）
-pwsh -File ai-consult-ai-consult-tools\claude\make_consult_bundle.ps1 -Mode diff -RepoRoot "C:\your-repo"
+pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode diff -RepoRoot "C:\your-repo"
 
 # staged差分
-pwsh -File ai-consult-ai-consult-tools\claude\make_consult_bundle.ps1 -Mode diff -RepoRoot "C:\your-repo" -Staged
+pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode diff -RepoRoot "C:\your-repo" -Staged
 
 # コミット間差分
-pwsh -File ai-consult-ai-consult-tools\claude\make_consult_bundle.ps1 -Mode diff -RepoRoot "C:\your-repo" -DiffBase HEAD~1 -DiffTarget HEAD
+pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode diff -RepoRoot "C:\your-repo" -DiffBase HEAD~1 -DiffTarget HEAD
 ```
 
 ### Mode: repo（全体スナップショット）
@@ -132,7 +143,7 @@ pwsh -File ai-consult-ai-consult-tools\claude\make_consult_bundle.ps1 -Mode diff
 リポジトリ全体を本文付きで出力します。大規模リポジトリでは出力が大きくなるため、通常はmap→includeを優先してください。
 
 ```powershell
-pwsh -File ai-consult-ai-consult-tools\claude\make_consult_bundle.ps1 -Mode repo -RepoRoot "C:\your-repo"
+pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode repo -RepoRoot "C:\your-repo"
 ```
 
 ### CaseName オプション（推奨）
@@ -140,7 +151,7 @@ pwsh -File ai-consult-ai-consult-tools\claude\make_consult_bundle.ps1 -Mode repo
 生成物のファイル名に任意の識別名を付けられます。
 
 ```powershell
-pwsh -File ai-consult-ai-consult-tools\claude\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\your-repo" -CaseName "login_feature" -IncludePaths "src\Auth"
+pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\your-repo" -CaseName "login_feature" -IncludePaths "src\Auth"
 # → consult_case/<DocSet>_include_login_feature.md
 ```
 
@@ -163,7 +174,7 @@ pwsh -File ai-consult-ai-consult-tools\claude\make_consult_bundle.ps1 -Mode incl
 ## 出力ファイルの場所
 
 ```
-ai-consult-ai-consult-tools/claude/consult_case/<DocSet>_<Mode>[_<CaseName>].md
+ai-consult-tools/claude/consult_case/<DocSet>_<Mode>[_<CaseName>].md
 ```
 
 生成されたMDファイルをClaudeのチャットに添付するだけで、根拠確定した相談が始められます。
