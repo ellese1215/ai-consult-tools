@@ -168,7 +168,7 @@ function Write-Utf8NoBomFile([string]$path, [string]$content) {
 # ----------------------------
 # v1.7.0: デフォルト探索パスを ai-consult-tools\claude\ に変更 / フォルダ改名対応
 $DefaultConfigRelCandidates = @(
-    "ai-consult-ai-consult-tools\claude\consult.config.json",
+    "ai-consult-tools\claude\consult.config.json",
     ".consult\consult.config.json"
 )
 
