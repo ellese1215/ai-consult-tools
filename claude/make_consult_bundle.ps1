@@ -19,34 +19,34 @@ Usage examples:
   # ------------------------------------------------------------
   # Mode D: map（本文なし軽量地図）
   # ------------------------------------------------------------
-  pwsh -File tools\claude\make_consult_bundle.ps1 -Mode map -RepoRoot "C:\xampp\htdocs"
+  pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode map -RepoRoot "C:\xampp\htdocs"
 
   # ------------------------------------------------------------
   # Mode C: repo（全体横断スナップショット）
   # ------------------------------------------------------------
-  pwsh -File tools\claude\make_consult_bundle.ps1 -Mode repo -RepoRoot "C:\xampp\htdocs"
+  pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode repo -RepoRoot "C:\xampp\htdocs"
 
-  # 設定ファイルを明示する例（未指定時は tools\claude\consult.config.json → .consult\consult.config.json の順に自動探索）
-  pwsh -File tools\claude\make_consult_bundle.ps1 -Mode repo -RepoRoot "C:\xampp\htdocs" -ConfigPath ".consult\consult.config.json"
+  # 設定ファイルを明示する例（未指定時は ai-consult-tools\claude\consult.config.json → .consult\consult.config.json の順に自動探索）
+  pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode repo -RepoRoot "C:\xampp\htdocs" -ConfigPath ".consult\consult.config.json"
 
   # 複数行（読みやすさ重視）
-  pwsh -File tools\claude\make_consult_bundle.ps1 `
+  pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 `
     -Mode repo `
     -RepoRoot "C:\xampp\htdocs"
 
   # ------------------------------------------------------------
   # Mode A: include（範囲指定スナップショット）
   # ------------------------------------------------------------
-  pwsh -File tools\claude\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\xampp\htdocs" -IncludePaths "common"
+  pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\xampp\htdocs" -IncludePaths "common"
 
   # 複数パス指定（配列）
-  pwsh -File tools\claude\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\xampp\htdocs" -IncludePaths "common","admin","db\schema"
+  pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\xampp\htdocs" -IncludePaths "common","admin","db\schema"
 
   # v1.4.5: ファイル名のみ/フォルダ名のみ指定（同名複数ヒット時は停止 / ワイルドカード非対応）
-  pwsh -File tools\claude\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\xampp\htdocs" -IncludePaths "Navigation.php","Loader.php"
+  pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\xampp\htdocs" -IncludePaths "Navigation.php","Loader.php"
 
   # 複数行（読みやすさ重視）
-  pwsh -File tools\claude\make_consult_bundle.ps1 `
+  pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 `
     -Mode include `
     -RepoRoot "C:\xampp\htdocs" `
     -IncludePaths "common","admin","db\schema"
@@ -55,13 +55,13 @@ Usage examples:
   # Mode B: diff（差分バンドル）
   # ------------------------------------------------------------
   # 未コミット差分（既定: HEAD vs 作業ツリー）
-  pwsh -File tools\claude\make_consult_bundle.ps1 -Mode diff -RepoRoot "C:\xampp\htdocs"
+  pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode diff -RepoRoot "C:\xampp\htdocs"
 
   # staged 差分
-  pwsh -File tools\claude\make_consult_bundle.ps1 -Mode diff -RepoRoot "C:\xampp\htdocs" -Staged
+  pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode diff -RepoRoot "C:\xampp\htdocs" -Staged
 
   # ref 間差分
-  pwsh -File tools\claude\make_consult_bundle.ps1 -Mode diff -RepoRoot "C:\xampp\htdocs" -DiffBase HEAD~1 -DiffTarget HEAD
+  pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode diff -RepoRoot "C:\xampp\htdocs" -DiffBase HEAD~1 -DiffTarget HEAD
 #>
 
 [CmdletBinding()]
@@ -99,7 +99,7 @@ function Assert-RequiredPwsh {
     $currentVersion = $PSVersionTable.PSVersion
     if ($null -eq $currentVersion -or $currentVersion.Major -lt 7) {
         $hostLabel = if ($PSVersionTable.PSEdition) { $PSVersionTable.PSEdition } else { "WindowsPowerShell" }
-        $scriptPath = if ($PSCommandPath) { $PSCommandPath } else { "tools\claude\make_consult_bundle.ps1" }
+        $scriptPath = if ($PSCommandPath) { $PSCommandPath } else { "ai-consult-tools\claude\make_consult_bundle.ps1" }
         throw ("Unsupported PowerShell host: {0} {1}. This script requires PowerShell 7+ (pwsh). Re-run with: pwsh -File `"{2}`" -Mode {3} -RepoRoot `"{4}`"" -f $hostLabel, $currentVersion, $scriptPath, $Mode, $RepoRoot)
     }
 }
@@ -166,9 +166,9 @@ function Write-Utf8NoBomFile([string]$path, [string]$content) {
 # ----------------------------
 # Config / exclusions (v1.5.0)
 # ----------------------------
-# v1.7.0: デフォルト探索パスを tools\claude\ に変更 / フォルダ改名対応
+# v1.7.0: デフォルト探索パスを ai-consult-tools\claude\ に変更 / フォルダ改名対応
 $DefaultConfigRelCandidates = @(
-    "ai-consult-tools\claude\consult.config.json",
+    "ai-consult-ai-consult-tools\claude\consult.config.json",
     ".consult\consult.config.json"
 )
 
@@ -281,7 +281,7 @@ function Resolve-ConsultConfigPath([string]$repoFull, [string]$configPath) {
     }
 
     $candidatesText = ($DefaultConfigRelCandidates -join ', ')
-    throw "consult config not found. Specify -ConfigPath or create one of: $candidatesText. You can copy tools\claude\consult.config.example.json as a starting point."
+    throw "consult config not found. Specify -ConfigPath or create one of: $candidatesText. You can copy ai-consult-tools\claude\consult.config.example.json as a starting point."
 }
 
 function Apply-ConsultConfig([string]$repoFull, [string]$configPath) {
