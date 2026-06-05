@@ -11,14 +11,14 @@
 
 ### ステップ1：include bundleを生成する
 
-相談内容に応じて必要なファイルをincludeモードで抽出します。
+相談内容に応じて必要なファイルをincludeモードで抽出します。`consult.local.md` が存在する場合は必ず含めてください。
 
 ```powershell
 cd C:\your-repo; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-tools\claude\make_consult_bundle.ps1 `
   -Mode include `
   -RepoRoot "C:\your-repo" `
   -CaseName "<相談名>" `
-  -IncludePaths "ai-consult-tools/claude/00_ai_consult_operation_rules.md","<対象ファイルのパス>"
+  -IncludePaths "ai-consult-tools/claude/00_ai_consult_operation_rules.md","ai-consult-tools/claude/consult.local.md","<対象ファイルのパス>"
 ```
 
 生成された `.md` ファイルをClaudeのチャットに添付します。
