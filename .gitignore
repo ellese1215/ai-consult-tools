@@ -1,6 +1,9 @@
-﻿# consult_case: bundle生成物（一時的な添付用ファイル群、Git管理外）
+# consult_case: bundle生成物（一時的な添付用ファイル群、Git管理外）
 claude/consult_case/
 chatgpt/consult_case/
 
 claude/consult.config.json
 chatgpt/consult.config.json
+# backups: generated/manual backup snapshots, Git管理外
+.backups/
+**/.backups/

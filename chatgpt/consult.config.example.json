@@ -3,6 +3,7 @@
   "ruleFile": "ai-consult-tools/chatgpt/00_ai_consult_operation_rules.md",
   "excludeFolders": [
     ".git",
+    ".backups",
     ".tmp.drivedownload",
     ".tmp.driveupload",
     ".gradle",
