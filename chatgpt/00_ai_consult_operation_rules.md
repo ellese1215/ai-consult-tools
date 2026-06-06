@@ -1,10 +1,10 @@
 # 00 AI相談運用ルール
 
 > File: 00_ai_consult_operation_rules.md
-> Updated: 2026-06-06 03:10
+> Updated: 2026-06-06 18:20
 > DocSet: 202606060310
-> Version: 1.9.1
-> Note: v1.9.1 では consult.local.md をChatGPT相談フローにも導入し、ビルドコマンド・includeパターンをローカル設定参照に統一する。
+> Version: 1.9.4
+> Note: v1.9.4 では、引き継ぎ文の include 生成コマンドを本文から分離し、コピペしやすい単独コードブロックとして提示するルールを明確化する。
 
 ---
 
@@ -731,7 +731,7 @@ AIはTODOドキュメントを読み、現在どのPhaseのどの小作業に相
 
 この順序を守り、TODOドキュメントの更新なしに引き継ぎ文を作成しない。
 
-#### 8.4.3 引き継ぎ文の指示文テンプレート（v1.9.3）
+#### 8.4.3 引き継ぎ文の指示文テンプレート（v1.9.4）
 
 AIが引き継ぎ文（`02_consult_template.md` セクション11）を作成するとき、新スレッドへの指示文には、**fresh include bundle 生成コマンドを必ず含める**。
 
@@ -757,6 +757,8 @@ AIが引き継ぎ文（`02_consult_template.md` セクション11）を作成す
 > まず以下の include bundle を生成し、その ZIP を添付します。添付後、この相談を開始してください。
 
 続けて、`consult.local.md` の include コマンドパターンを基準にした、現在作業用の具体的な include 生成コマンドを単独の `powershell` コードブロックで書く。
+
+この include 生成コマンドは、ユーザーが安全にコピー＆ペーストできるように、引き継ぎ本文とは分離して提示する。長い引き継ぎ本文・説明文・writing block 等の中に埋め込まず、コマンド単体のコードブロックとして先に出すこと。
 
 ```powershell
 cd C:\xampp\htdocs; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-tools\chatgpt\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\xampp\htdocs" -ConfigPath "ai-consult-tools\chatgpt\consult.config.json" -CaseName "<相談名>" -IncludePaths "ai-consult-tools/chatgpt/00_ai_consult_operation_rules.md","ai-consult-tools/chatgpt/consult.local.md","<TODOドキュメントのパス>","<現在作業に必要な実ファイル>"
