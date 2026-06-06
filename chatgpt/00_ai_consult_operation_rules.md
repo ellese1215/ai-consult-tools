@@ -288,13 +288,21 @@ Mode=map により洗い出した候補を手がかりとして、次段で **Mo
 Map では不足する場合のみ、従来の **Mode=repo** を本文付き横断スナップショットとして使用する。
 実装後の回帰確認は **Mode=diff** を基本とする。
 
-#### 2.4.4.1 patch / コードブロック出力の運用（v1.6.1）
+#### 2.4.4.1 PowerShell / `.ps1` 優先と patch / コードブロック出力の運用（v1.9.4）
 
-patch とコードブロックは、今後も通常の相談手段として使用する。
-ただし、破損した patch や閉じ忘れたコードブロックによる無駄な往復を避けるため、次のルールを必須とする。
+既存ファイルの書き換え・新規作成が必要な場合は、原則として **PowerShell コマンドまたは `.ps1` スクリプトによる書き換えを優先**する。これは 3.0節のChatGPT相談フロー、4.1節の「ファイルの書き換え・新規作成が必要な場合は `.ps1` スクリプトファイルとして提示する」ルール、8.3節の配置ルールを優先するためである。
+
+patch は完全禁止ではない。ただし、patch は通常の第一候補ではなく、次のいずれかに該当する場合の例外手段として扱う。
+
+- ユーザーが明示的に patch 方式を希望した場合
+- 小規模なコード / SCSS / TS / PHP 等の差分で、`git apply --check` による適用確認が容易な場合
+- ユーザー環境の実体差分を確認するためのレビュー用成果物として patch が有効な場合
+
+特に、Markdown、長文ドキュメント、日本語を多く含む文書、コードフェンスを含む文書、CRLF / LF 差異の影響を受けやすいファイルでは、patch より PowerShell / `.ps1` を優先する。
 
 patch を出す場合：
 
+- patch 方式を選んだ理由と、適用前後に実行する確認コマンドを併記する。
 - **fresh include bundle** または **fresh diff bundle** に含まれる対象ファイル本文を根拠にする。include bundle の本文が Markdown snapshot として収録されている場合も、対象ファイル全体が確認でき、truncated でないなら patch 生成根拠として使用してよい。
 - map / repo 束だけを根拠に、既存ファイルへの patch を出さない。
 - patch は、変更前ファイルと変更後ファイルから作った **機械的diff** に限定する。
@@ -317,7 +325,7 @@ patch を出す場合：
 - PowerShell コマンドは、原則として1行で提示する。
 - 長い引き継ぎ文・patch・設定例をコードブロックで出す場合は、説明文をコードブロック内に混ぜず、コピー対象と説明対象を分ける。
 
-目的は patch やコードブロックを避けることではなく、**fresh bundle 根拠・機械的生成・適用確認・diff bundle 査読**により、壊れた出力を減らすことである。
+目的は patch を完全禁止することではなく、**PowerShell / `.ps1` 優先・fresh bundle 根拠・機械的生成・適用確認・diff bundle 査読**により、壊れた出力を減らすことである。
 
 #### 2.4.5 診断出力（-Diag）の扱い
 
@@ -723,18 +731,58 @@ AIはTODOドキュメントを読み、現在どのPhaseのどの小作業に相
 
 この順序を守り、TODOドキュメントの更新なしに引き継ぎ文を作成しない。
 
-#### 8.4.3 引き継ぎ文の指示文テンプレート（v1.7.7）
+#### 8.4.3 引き継ぎ文の指示文テンプレート（v1.9.3）
 
-AIが引き継ぎ文（`02_consult_template.md` セクション11）を作成するとき、新スレッドへの指示文には必ず以下を含める。
+AIが引き継ぎ文（`02_consult_template.md` セクション11）を作成するとき、新スレッドへの指示文には、**fresh include bundle 生成コマンドを必ず含める**。
 
-```text
-前スレッドからの引き継ぎです。添付のinclude bundleを唯一の正として参照確定してください。
-`00_ai_consult_operation_rules.md` の最新バージョンに従い、以下の順で宣言してから作業を開始してください。
+このプロジェクトでは、新スレッド開始時に `00_ai_consult_operation_rules.md`、該当TODOドキュメント、`consult.local.md` を含む include bundle を参照する運用を必須とする。そのため、引き継ぎ文に include 生成コマンドがない場合、新スレッドで運用ルール参照が成立しない。
 
-1. 運用ルール認識完了を宣言する
-2. TODOドキュメント（添付のinclude bundle内）を読み、現在どのPhaseの相談かを確認・宣言する
-3. 引き継ぎ情報を読んだ上で、残課題・次の相談内容から作業を開始する
+引き継ぎ文は、ユーザーが新スレッド冒頭にそのまま貼り付ければ、include bundle 生成、ZIP添付、相談開始まで進められる文章でなければならない。
+
+必須構成：
+
+1. 文頭に「まず以下の include bundle を生成し、その ZIP を添付します。添付後、この相談を開始してください。」を入れる
+2. `consult.local.md` の include コマンドパターンを基準に、現在作業中の対象ファイルを過不足なく含めた具体的な include 生成コマンドを入れる
+3. include コマンドには、少なくとも `00_ai_consult_operation_rules.md`、`consult.local.md`、現在作業中のフェーズに該当するTODOドキュメントを含める
+4. 添付 include bundle を唯一の正として参照確定するよう指示する
+5. `00_ai_consult_operation_rules.md` を最優先で読み、要点を引用して「運用ルール認識完了」を宣言するよう指示する
+6. TODOドキュメントを読み、現在どのPhaseの相談かを確認・宣言するよう指示する
+7. 直前スレッドの完了済み作業、残課題、次に確認する内容を具体的に書く
+8. すぐに patch / diff を出さず、実在ファイル・実在見出し・実在DOM / selector・変更予定箇所・根拠・Blocking Questions を先に提示するよう指示する
+
+引き継ぎ文に含める指示文の基本形：
+
+引き継ぎ文の冒頭には、次の文を通常本文として書く。
+
+> まず以下の include bundle を生成し、その ZIP を添付します。添付後、この相談を開始してください。
+
+続けて、`consult.local.md` の include コマンドパターンを基準にした、現在作業用の具体的な include 生成コマンドを単独の `powershell` コードブロックで書く。
+
+```powershell
+cd C:\xampp\htdocs; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-tools\chatgpt\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\xampp\htdocs" -ConfigPath "ai-consult-tools\chatgpt\consult.config.json" -CaseName "<相談名>" -IncludePaths "ai-consult-tools/chatgpt/00_ai_consult_operation_rules.md","ai-consult-tools/chatgpt/consult.local.md","<TODOドキュメントのパス>","<現在作業に必要な実ファイル>"
 ```
+
+その後、通常本文として以下の内容を含める。
+
+- 添付する include bundle 内の `ai-consult-tools/chatgpt/00_ai_consult_operation_rules.md` を最優先で精査し、要点を引用して「運用ルール認識完了」を宣言してから着手すること
+- `ai-consult-tools/chatgpt/consult.local.md` も確認し、ビルドコマンドや include / diff コマンドパターンを推測しないこと
+- 添付 include bundle を唯一の正として参照確定し、TODOドキュメントを読んで現在どのPhaseの相談かを確認・宣言すること
+- すぐに patch / diff を出さず、まず以下を提示すること
+  1. 実在ファイル一覧
+  2. 実在見出し / 実在セレクタ / 実在DOM一覧
+  3. 現在のPhase上の位置
+  4. 次に変更・確認する予定箇所
+  5. その根拠
+  6. Blocking Questions
+- Blocking Questions がない場合だけ、実ファイルを根拠に修正案へ進むこと
+
+禁止事項：
+
+- include 生成コマンドのない引き継ぎ文を出力しない
+- 「bundleを生成してください」だけで終わる引き継ぎ文を出力しない
+- 添付後に相談が開始されない引き継ぎ文を出力しない
+- `consult.local.md` のパターンを確認せず、include コマンドを推測しない
+- 現在作業に必要な IncludePaths を確認せず、古い include パターンをそのまま流用しない
 
 ---
 
