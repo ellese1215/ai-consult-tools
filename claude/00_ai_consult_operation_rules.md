@@ -1,10 +1,10 @@
-# 00 AI相談運用ルール
+﻿# 00 AI相談運用ルール
 
 > File: 00_ai_consult_operation_rules.md
-> Updated: 2026-06-06 03:00
+> Updated: 2026-06-06
 > DocSet: 202606060300
-> Version: 1.9.1
-> Note: v1.9.1 では 8.4.1節のスレッド開始時includeコマンドに consult.local.md を追加。
+> Version: 1.9.2
+> Note: v1.9.2 では 1.1.4節「未参照のコードは記憶・推測で補完せずincludeを要求する」を追加。
 
 ---
 
@@ -78,6 +78,13 @@
 - `db/current/` と migration / schema / docs が矛盾する場合は、原則として `db/current/` を優先し、差異を docs / TODO に記録する
 - DB構造変更を伴う migration / seed 適用後は、`db/current/schema_inventory.sql` を実行し、`db/current/schema_inventory_result.md` と必要な table summary を更新する
 - `db/current/` が未整備、古い、または実行エラーと矛盾する場合は、対象テーブルの `information_schema` 診断SQLを `.sql` ファイルとして `db/diagnostics/` 配下に保存し、ユーザー実行結果を確認してから修正する
+
+### 1.1.4 未参照のコードは記憶・推測で補完せずincludeを要求する（v1.9.2）
+
+- AIはSCSSのmixin定義値・変数値・TypeScriptの定数・PHPの設定値など、参照束に含まれていない実装値を記憶や推測で答えない
+- 「おそらく〇〇px」「一般的には〇〇」のような補完は禁止
+- 値の確認が必要な場合は、該当ファイルを含むinclude bundleの生成コマンドを提示してユーザーに要求する
+- ユーザーがincludeを要求するよりも先にAIが率先してincludeを要求することを原則とする
 
 ### 1.2 意図しないコードの破壊的変更の禁止
 
