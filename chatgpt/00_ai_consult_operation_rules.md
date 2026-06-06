@@ -723,18 +723,58 @@ AIはTODOドキュメントを読み、現在どのPhaseのどの小作業に相
 
 この順序を守り、TODOドキュメントの更新なしに引き継ぎ文を作成しない。
 
-#### 8.4.3 引き継ぎ文の指示文テンプレート（v1.7.7）
+#### 8.4.3 引き継ぎ文の指示文テンプレート（v1.9.3）
 
-AIが引き継ぎ文（`02_consult_template.md` セクション11）を作成するとき、新スレッドへの指示文には必ず以下を含める。
+AIが引き継ぎ文（`02_consult_template.md` セクション11）を作成するとき、新スレッドへの指示文には、**fresh include bundle 生成コマンドを必ず含める**。
 
-```text
-前スレッドからの引き継ぎです。添付のinclude bundleを唯一の正として参照確定してください。
-`00_ai_consult_operation_rules.md` の最新バージョンに従い、以下の順で宣言してから作業を開始してください。
+このプロジェクトでは、新スレッド開始時に `00_ai_consult_operation_rules.md`、該当TODOドキュメント、`consult.local.md` を含む include bundle を参照する運用を必須とする。そのため、引き継ぎ文に include 生成コマンドがない場合、新スレッドで運用ルール参照が成立しない。
 
-1. 運用ルール認識完了を宣言する
-2. TODOドキュメント（添付のinclude bundle内）を読み、現在どのPhaseの相談かを確認・宣言する
-3. 引き継ぎ情報を読んだ上で、残課題・次の相談内容から作業を開始する
+引き継ぎ文は、ユーザーが新スレッド冒頭にそのまま貼り付ければ、include bundle 生成、ZIP添付、相談開始まで進められる文章でなければならない。
+
+必須構成：
+
+1. 文頭に「まず以下の include bundle を生成し、その ZIP を添付します。添付後、この相談を開始してください。」を入れる
+2. `consult.local.md` の include コマンドパターンを基準に、現在作業中の対象ファイルを過不足なく含めた具体的な include 生成コマンドを入れる
+3. include コマンドには、少なくとも `00_ai_consult_operation_rules.md`、`consult.local.md`、現在作業中のフェーズに該当するTODOドキュメントを含める
+4. 添付 include bundle を唯一の正として参照確定するよう指示する
+5. `00_ai_consult_operation_rules.md` を最優先で読み、要点を引用して「運用ルール認識完了」を宣言するよう指示する
+6. TODOドキュメントを読み、現在どのPhaseの相談かを確認・宣言するよう指示する
+7. 直前スレッドの完了済み作業、残課題、次に確認する内容を具体的に書く
+8. すぐに patch / diff を出さず、実在ファイル・実在見出し・実在DOM / selector・変更予定箇所・根拠・Blocking Questions を先に提示するよう指示する
+
+引き継ぎ文に含める指示文の基本形：
+
+引き継ぎ文の冒頭には、次の文を通常本文として書く。
+
+> まず以下の include bundle を生成し、その ZIP を添付します。添付後、この相談を開始してください。
+
+続けて、`consult.local.md` の include コマンドパターンを基準にした、現在作業用の具体的な include 生成コマンドを単独の `powershell` コードブロックで書く。
+
+```powershell
+cd C:\xampp\htdocs; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-tools\chatgpt\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\xampp\htdocs" -ConfigPath "ai-consult-tools\chatgpt\consult.config.json" -CaseName "<相談名>" -IncludePaths "ai-consult-tools/chatgpt/00_ai_consult_operation_rules.md","ai-consult-tools/chatgpt/consult.local.md","<TODOドキュメントのパス>","<現在作業に必要な実ファイル>"
 ```
+
+その後、通常本文として以下の内容を含める。
+
+- 添付する include bundle 内の `ai-consult-tools/chatgpt/00_ai_consult_operation_rules.md` を最優先で精査し、要点を引用して「運用ルール認識完了」を宣言してから着手すること
+- `ai-consult-tools/chatgpt/consult.local.md` も確認し、ビルドコマンドや include / diff コマンドパターンを推測しないこと
+- 添付 include bundle を唯一の正として参照確定し、TODOドキュメントを読んで現在どのPhaseの相談かを確認・宣言すること
+- すぐに patch / diff を出さず、まず以下を提示すること
+  1. 実在ファイル一覧
+  2. 実在見出し / 実在セレクタ / 実在DOM一覧
+  3. 現在のPhase上の位置
+  4. 次に変更・確認する予定箇所
+  5. その根拠
+  6. Blocking Questions
+- Blocking Questions がない場合だけ、実ファイルを根拠に修正案へ進むこと
+
+禁止事項：
+
+- include 生成コマンドのない引き継ぎ文を出力しない
+- 「bundleを生成してください」だけで終わる引き継ぎ文を出力しない
+- 添付後に相談が開始されない引き継ぎ文を出力しない
+- `consult.local.md` のパターンを確認せず、include コマンドを推測しない
+- 現在作業に必要な IncludePaths を確認せず、古い include パターンをそのまま流用しない
 
 ---
 
