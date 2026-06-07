@@ -1,6 +1,6 @@
 {
   "outRoot": "ai-consult-tools/chatgpt/consult_case",
-  "ruleFile": "ai-consult-tools/chatgpt/00_ai_consult_operation_rules.md",
+  "ruleFile": "ai-consult-tools/shared/00_ai_consult_operation_rules.md",
   "excludeFolders": [
     ".git",
     ".backups",
@@ -97,14 +97,15 @@
     "GoogleService-Info.plist"
   ],
   "allowedToolIncludeFiles": [
-    "ai-consult-tools/chatgpt/00_ai_consult_operation_rules.md",
+    "ai-consult-tools/shared/00_ai_consult_operation_rules.md",
     "ai-consult-tools/chatgpt/01_make_consult_bundle_spec.md",
     "ai-consult-tools/chatgpt/02_consult_template.md",
     "ai-consult-tools/chatgpt/09_consult_test_command.md",
     "ai-consult-tools/chatgpt/README_release.md",
-    "ai-consult-tools/chatgpt/SECURITY.md",
+    "ai-consult-tools/shared/SECURITY.md",
     "ai-consult-tools/chatgpt/consult.config.json",
     "ai-consult-tools/chatgpt/consult.config.example.json",
-    "ai-consult-tools/chatgpt/make_consult_bundle.ps1"
+    "ai-consult-tools/chatgpt/make_consult_bundle.ps1",
+    "ai-consult-tools/shared/consult.local.example.md"
   ]
 }

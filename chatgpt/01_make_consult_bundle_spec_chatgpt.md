@@ -289,4 +289,4 @@ cd C:\xampp\htdocs; pwsh -NoProfile -ExecutionPolicy Bypass -File tools\chatgpt\
 
 公開用ZIPには、生成済み相談束、過去ログ、バックアップZIP、秘密情報、個人環境の絶対パスが濃いファイルを含めないでください。
 
-詳細は `SECURITY.md` を参照してください。
+詳細は `shared/SECURITY.md` を参照してください。

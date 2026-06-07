@@ -12,7 +12,7 @@
 
 AI相談で使う場合、最初に `00_ai_consult_operation_rules.md` を読み、要点を確認してから作業します。このルール文書は軽視しません。
 
-ツール仕様や引数は `01_make_consult_bundle_spec.md` を参照します。秘密情報や公開ZIPの注意点は `SECURITY.md` を参照します。
+ツール仕様や引数は `01_make_consult_bundle_spec.md` を参照します。秘密情報や公開ZIPの注意点は `shared/SECURITY.md` を参照します。
 
 ## 3. 配置例
 
@@ -30,7 +30,7 @@ ai-consult-tools/chatgpt/
 
 `consult.config.json` が除外ルールと出力先の正です。v1.5.0 では、除外ルールを ps1 内に固定せず、設定ファイルで管理します。
 
-`consult.local.md` はプロジェクト固有のビルドコマンドやincludeコマンドパターンを記載するローカル専用ファイルです。Git管理外にし、公開用には `consult.local.example.md` のみを含めます。
+`consult.local.md` はプロジェクト固有のビルドコマンドやincludeコマンドパターンを記載するローカル専用ファイルです。Git管理外にし、公開用には `shared/consult.local.example.md` のみを含めます。
 
 ## 4. 最短コマンド
 
@@ -43,7 +43,7 @@ cd C:\xampp\htdocs; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-too
 必要ファイルだけを束ねる include 用です。
 
 ```powershell
-cd C:\xampp\htdocs; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-tools\chatgpt\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\xampp\htdocs" -CaseName "include_check" -IncludePaths "ai-consult-tools/chatgpt/00_ai_consult_operation_rules.md,ai-consult-tools/chatgpt/make_consult_bundle.ps1"
+cd C:\xampp\htdocs; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-tools\chatgpt\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\xampp\htdocs" -CaseName "include_check" -IncludePaths "ai-consult-tools/shared/00_ai_consult_operation_rules.md,ai-consult-tools/chatgpt/make_consult_bundle.ps1"
 ```
 
 Git差分を束ねる diff 用です。
@@ -71,7 +71,7 @@ cd C:\xampp\htdocs; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-too
 
 ## 6. consult.local.md の作成
 
-`consult.local.example.md` をコピーして `consult.local.md` を作成し、ビルドコマンド等を記載してください。
+`shared/consult.local.example.md` をコピーして `consult.local.md` を作成し、ビルドコマンド等を記載してください。
 
 ```powershell
 Copy-Item ai-consult-tools\chatgpt\consult.local.example.md ai-consult-tools\chatgpt\consult.local.md
@@ -97,7 +97,7 @@ SECURITY.md
 
 ## 8. 公開用ZIPに入れないもの
 
-詳細は `SECURITY.md` に集約しています。最低限、生成済み `consult_case`、過去の相談ZIP、バックアップZIP、`.env`、秘密鍵、keystore、DB、ログは含めないでください。
+詳細は `shared/SECURITY.md` に集約しています。最低限、生成済み `consult_case`、過去の相談ZIP、バックアップZIP、`.env`、秘密鍵、keystore、DB、ログは含めないでください。
 
 ## 9. smoke test
 

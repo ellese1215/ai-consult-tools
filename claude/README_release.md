@@ -80,15 +80,15 @@ Copy-Item ai-consult-tools\claude\consult.config.example.json ai-consult-tools\c
 | `excludeExtensions` | 除外する拡張子のリスト |
 | `secretNamePatterns` | 除外するファイル名パターン（機密情報ファイル） |
 
-詳細は `consult.config.example.json` のコメントおよび `SECURITY.md` を参照してください。
+詳細は `consult.config.example.json` のコメントおよび `shared/SECURITY.md` を参照してください。
 
 ### 3. consult.local.md を作成する
 
-`consult.local.example.md` をコピーして `consult.local.md` を作成し、ビルドコマンド等を記載してください。
+`shared/consult.local.example.md` をコピーして `consult.local.md` を作成し、ビルドコマンド等を記載してください。
 
 ```bash
 # Mac / Linux
-cp ai-consult-tools/claude/consult.local.example.md ai-consult-tools/claude/consult.local.md
+cp ai-consult-tools/shared/consult.local.example.md ai-consult-tools/claude/consult.local.md
 
 # Windows (PowerShell)
 Copy-Item ai-consult-tools\claude\consult.local.example.md ai-consult-tools\claude\consult.local.md
@@ -113,17 +113,17 @@ ai-consult-tools/claude/consult.local.md
 
 ```bash
 # map：リポジトリ全体の構造を把握する
-python consult_bundle_claude.py --mode map --repo-root <your-repo>
+python ai-consult-tools/claude/consult_bundle_claude.py --mode map --repo-root <your-repo>
 
 # include：特定のファイル・フォルダを本文付きで出力する
-python consult_bundle_claude.py --mode include --repo-root <your-repo> \
+python ai-consult-tools/claude/consult_bundle_claude.py --mode include --repo-root <your-repo> \
   --include-paths "src/controllers" "src/models"
 
 # diff：修正後の変更内容をレビューする
-python consult_bundle_claude.py --mode diff --repo-root <your-repo>
+python ai-consult-tools/claude/consult_bundle_claude.py --mode diff --repo-root <your-repo>
 
 # repo：リポジトリ全体を本文付きで出力する（大規模リポジトリでは出力が大きくなる）
-python consult_bundle_claude.py --mode repo --repo-root <your-repo>
+python ai-consult-tools/claude/consult_bundle_claude.py --mode repo --repo-root <your-repo>
 ```
 
 引数の詳細は `01_make_consult_bundle_spec.md` を、相談フローの詳細は `03_claude_session_guide.md` を参照してください。
@@ -144,4 +144,4 @@ ai-consult-tools/claude/consult_case/<DocSet>_<Mode>[_<CaseName>].md
 
 - `secretNamePatterns` に一致するファイルは**自動的に除外**されます。ただし、設定が適切かどうかは必ず自分で確認してください。
 - `consult.config.json` 自体に機密情報を書かないでください。
-- 詳細は `SECURITY.md` を参照してください。
+- 詳細は `shared/SECURITY.md` を参照してください。

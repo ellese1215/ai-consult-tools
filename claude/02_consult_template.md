@@ -27,7 +27,7 @@
 ## スレッド開始時のincludeコマンド（例）
 
 ```bash
-cd <your-repo>; python consult_bundle_claude.py --mode include --repo-root <your-repo> --case-name "<相談名>" --include-paths "ai-consult-tools/claude/00_ai_consult_operation_rules.md" "<対象ファイルのパス>"
+cd <your-repo>; python ai-consult-tools/claude/consult_bundle_claude.py --mode include --repo-root <your-repo> --case-name "<相談名>" --include-paths "ai-consult-tools/shared/00_ai_consult_operation_rules.md" "<対象ファイルのパス>"
 ```
 
 ---

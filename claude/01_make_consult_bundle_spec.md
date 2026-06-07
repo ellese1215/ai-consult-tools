@@ -55,7 +55,7 @@
 - include対象の候補ファイルを洗い出すために最初に実行する
 
 ```bash
-python consult_bundle_claude.py --mode map --repo-root <your-repo>
+python ai-consult-tools/claude/consult_bundle_claude.py --mode map --repo-root <your-repo>
 ```
 
 ### include モード
@@ -69,11 +69,11 @@ python consult_bundle_claude.py --mode map --repo-root <your-repo>
 
 ```bash
 # 相対パス指定（複数はスペース区切り）
-python consult_bundle_claude.py --mode include --repo-root <your-repo> \
+python ai-consult-tools/claude/consult_bundle_claude.py --mode include --repo-root <your-repo> \
   --include-paths src/controllers src/models
 
 # ファイル名のみ指定（同名複数ヒット時は停止）
-python consult_bundle_claude.py --mode include --repo-root <your-repo> \
+python ai-consult-tools/claude/consult_bundle_claude.py --mode include --repo-root <your-repo> \
   --include-paths App.php
 ```
 
@@ -92,13 +92,13 @@ Git差分を出力します。修正後のレビューに使います。
 
 ```bash
 # 未コミット差分（既定）
-python consult_bundle_claude.py --mode diff --repo-root <your-repo>
+python ai-consult-tools/claude/consult_bundle_claude.py --mode diff --repo-root <your-repo>
 
 # staged差分
-python consult_bundle_claude.py --mode diff --repo-root <your-repo> --staged
+python ai-consult-tools/claude/consult_bundle_claude.py --mode diff --repo-root <your-repo> --staged
 
 # ref間差分
-python consult_bundle_claude.py --mode diff --repo-root <your-repo> \
+python ai-consult-tools/claude/consult_bundle_claude.py --mode diff --repo-root <your-repo> \
   --diff-base HEAD~1 --diff-target HEAD
 ```
 
@@ -113,7 +113,7 @@ python consult_bundle_claude.py --mode diff --repo-root <your-repo> \
 - mapでは不足する場合の広い参照として使用する
 
 ```bash
-python consult_bundle_claude.py --mode repo --repo-root <your-repo>
+python ai-consult-tools/claude/consult_bundle_claude.py --mode repo --repo-root <your-repo>
 ```
 
 ---
@@ -193,6 +193,6 @@ DocSetはバンドル生成時刻（JST）から自動生成されます。
 通常の相談フローでは使用しません。スクリプトが意図しないエラーで停止した場合のトラブルシュート時のみ使用してください。
 
 ```bash
-python consult_bundle_claude.py --mode include --repo-root <your-repo> \
+python ai-consult-tools/claude/consult_bundle_claude.py --mode include --repo-root <your-repo> \
   --include-paths src --diag
 ```
