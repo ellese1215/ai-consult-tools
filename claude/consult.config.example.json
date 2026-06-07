@@ -1,10 +1,7 @@
 {
-  "_comment": "consult.config.example.json - consult.config.json のテンプレートです。コピーして consult.config.json を作成し、あなたの環境に合わせて編集してください。",
-
+  "_comment": "consult.config.example.json - consult.config.json のテンプレートです。コピーして local/claude/consult.config.json を作成し、あなたの環境に合わせて編集してください。allowedToolIncludeFiles の local/ 系エントリは、local/claude/ 配下に実設定を置いた場合の例です。",
   "outRoot": "ai-consult-tools/claude/consult_case",
-
-  "ruleFile": "ai-consult-tools/claude/00_ai_consult_operation_rules.md",
-
+  "ruleFile": "ai-consult-tools/shared/00_ai_consult_operation_rules.md",
   "excludeFolders": [
     ".git",
     ".backups",
@@ -19,7 +16,6 @@
     "ai-consult-tools/claude/consult_case",
     "ai-consult-tools/claude/consult_project"
   ],
-
   "excludeExtensions": [
     ".xlsx",
     ".docx",
@@ -52,12 +48,10 @@
     ".dll",
     ".so"
   ],
-
   "excludeNamePatterns": [
     "*.min.js",
     "*.min.css"
   ],
-
   "secretNamePatterns": [
     ".env*",
     "*.env*",
@@ -76,16 +70,17 @@
     "google-services.json",
     "GoogleService-Info.plist"
   ],
-
   "allowedToolIncludeFiles": [
-    "ai-consult-tools/claude/00_ai_consult_operation_rules.md",
+    "ai-consult-tools/shared/00_ai_consult_operation_rules.md",
     "ai-consult-tools/claude/01_make_consult_bundle_spec.md",
     "ai-consult-tools/claude/02_consult_template.md",
     "ai-consult-tools/claude/03_claude_session_guide.md",
     "ai-consult-tools/claude/README_release.md",
-    "ai-consult-tools/claude/SECURITY.md",
-    "ai-consult-tools/claude/consult.config.json",
+    "ai-consult-tools/shared/SECURITY.md",
+    "ai-consult-tools/local/claude/consult.config.json",
     "ai-consult-tools/claude/consult.config.example.json",
-    "ai-consult-tools/claude/make_consult_bundle.ps1"
+    "ai-consult-tools/claude/consult_bundle_claude.py",
+    "ai-consult-tools/shared/consult.local.example.md",
+    "ai-consult-tools/local/claude/consult.local.md"
   ]
 }

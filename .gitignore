@@ -10,3 +10,17 @@ chatgpt/consult.config.json
 # consult.local.md: プロジェクト固有設定（Git管理外）
 claude/consult.local.md
 chatgpt/consult.local.md
+
+# BEGIN ai-consult-tools generated/local artifacts
+
+# Local private configuration and local-only archives
+local/
+archive/
+
+# Generated consult cases
+claude/consult_case/
+chatgpt/consult_case/
+consult_case/
+consult_project/
+
+# END ai-consult-tools generated/local artifacts
