@@ -71,6 +71,16 @@ your-repo/
 
 ### 2. 設定ファイルを作成する
 
+まず `local/claude/` ディレクトリを作成します。
+
+```bash
+# Mac / Linux
+mkdir -p ai-consult-tools/local/claude
+
+# Windows (PowerShell)
+New-Item -ItemType Directory -Force -Path ai-consult-tools\local\claude
+```
+
 `consult.config.example.json` をコピーして `consult.config.json` を作成し、あなたの環境に合わせて編集してください。
 
 ```bash

@@ -61,6 +61,17 @@ your-repo/
 
 使用するAIに応じて、公開テンプレートから `local/` 配下に実設定を作成してください。
 
+まず `local/` 配下のディレクトリを作成します。
+
+```bash
+# Mac / Linux
+mkdir -p ai-consult-tools/local/claude ai-consult-tools/local/chatgpt
+
+# Windows (PowerShell)
+New-Item -ItemType Directory -Force -Path ai-consult-tools\local\claude
+New-Item -ItemType Directory -Force -Path ai-consult-tools\local\chatgpt
+```
+
 **Claude版：**
 
 ```bash

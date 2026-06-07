@@ -42,6 +42,15 @@ ai-consult-tools/
 
 公開用テンプレートから、Git管理外の実設定を作成します。
 
+まず `local/chatgpt/` ディレクトリを作成します。
+
+```powershell
+cd C:\xampp\htdocs
+New-Item -ItemType Directory -Force -Path ai-consult-tools\local\chatgpt
+```
+
+次に設定ファイルをコピーします。
+
 ```powershell
 cd C:\xampp\htdocs
 Copy-Item .\ai-consult-tools\chatgpt\consult.config.example_chatgpt.json .\ai-consult-tools\local\chatgpt\consult.config_chatgpt.json
