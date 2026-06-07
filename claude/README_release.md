@@ -18,18 +18,21 @@ AIへの「推測による回答」を構造的に防ぎ、コードとドキュ
 
 ## ファイル構成
 
-```
-ai-consult-tools/claude/
-├── consult_bundle_claude.py          # バンドル生成スクリプト（本体）
-├── consult.config.json               # 除外ルール等の設定（あなたの環境向けに編集）
-├── consult.config.example.json       # 設定ファイルのテンプレート
-├── 00_ai_consult_operation_rules.md  # Claude相談の運用ルール
-├── 01_make_consult_bundle_spec.md    # スクリプト技術仕様
-├── 02_consult_template.md            # スレッド開始テンプレート
-├── 03_claude_session_guide.md        # セッション開始手順・モード選択ガイド
-├── consult.local.example.md          # プロジェクト固有設定のテンプレート
-├── SECURITY.md                       # セキュリティ・取り扱い注意事項
-└── consult_case/                     # 生成物の出力先（Git管理外推奨）
+
+```text
+ai-consult-tools/
+├── shared/
+│   ├── 00_ai_consult_operation_rules.md  # Claude / ChatGPT 共通の運用ルール
+│   ├── consult.local.example.md          # プロジェクト固有設定のテンプレート
+│   └── SECURITY.md                       # セキュリティ・取り扱い注意事項
+└── claude/
+    ├── consult_bundle_claude.py          # バンドル生成スクリプト（本体）
+    ├── consult.config.json               # 除外ルール等の設定（Git管理外）
+    ├── consult.config.example.json       # 設定ファイルのテンプレート
+    ├── 01_make_consult_bundle_spec.md    # スクリプト技術仕様
+    ├── 02_consult_template.md            # スレッド開始テンプレート
+    ├── 03_claude_session_guide.md        # セッション開始手順・モード選択ガイド
+    └── consult_case/                     # 生成物の出力先（Git管理外）
 ```
 
 ---
@@ -47,14 +50,19 @@ ai-consult-tools/claude/
 
 ### 1. ファイルを配置する
 
-`ai-consult-tools/claude/` ディレクトリをリポジトリルート配下に配置してください。
 
-```
+`ai-consult-tools/` ディレクトリを対象プロジェクトのリポジトリルート配下に配置してください。
+
+```text
 your-repo/
 └── ai-consult-tools/
+    ├── shared/
+    │   ├── 00_ai_consult_operation_rules.md
+    │   ├── consult.local.example.md
+    │   └── SECURITY.md
     └── claude/
         ├── consult_bundle_claude.py
-        ├── consult.config.json   ← consult.config.example.json をコピーして編集
+        ├── consult.config.example.json
         └── ...
 ```
 
@@ -91,7 +99,7 @@ Copy-Item ai-consult-tools\claude\consult.config.example.json ai-consult-tools\c
 cp ai-consult-tools/shared/consult.local.example.md ai-consult-tools/claude/consult.local.md
 
 # Windows (PowerShell)
-Copy-Item ai-consult-tools\claude\consult.local.example.md ai-consult-tools\claude\consult.local.md
+Copy-Item ai-consult-tools\shared\consult.local.example.md ai-consult-tools\claude\consult.local.md
 ```
 
 `consult.local.md` はGit管理外のため、コミットされません。スレッド開始時のinclude bundleに含めることで、AIがビルドコマンドを推測なく把握できます。
@@ -109,7 +117,7 @@ ai-consult-tools/claude/consult.local.md
 
 ## 基本的な使い方
 
-すべてのコマンドは `consult_bundle_claude.py` があるリポジトリルートで実行してください。
+すべてのコマンドは対象プロジェクトのリポジトリルートで実行し、スクリプトは `ai-consult-tools/claude/consult_bundle_claude.py` を指定してください。
 
 ```bash
 # map：リポジトリ全体の構造を把握する
