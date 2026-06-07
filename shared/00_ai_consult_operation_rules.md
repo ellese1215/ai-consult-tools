@@ -3,8 +3,8 @@
 > File: 00_ai_consult_operation_rules.md
 > Updated: 2026-06-07
 > DocSet: 202606070000
-> Version: 3.1.1
-> Note: v3.1.1 はClaude版・ChatGPT版共通。AI固有の差異は各節内に【Claude】【ChatGPT】ラベルで明示する。
+> Version: 3.1.2
+> Note: v3.1.2 では7.1節に`.py`スクリプト生成前の先出し確認ルールを追加、8章・9章から `git diff --check` を削除。
 
 ---
 
@@ -205,6 +205,13 @@ AIは影響範囲チェックの結果として次を提示する：
 - **ファイルの書き換え・新規作成は、コードブロックではなく `.py` スクリプトファイルとして提示する（7.3節参照）**
   - コードブロックは、実行コマンド例・参照用コード断片・AI内容確認用にとどめる
   - 「コードブロックで全文提示した」だけではスクリプト提示の義務を果たしたことにならない
+- **`.py` スクリプト生成前に以下を先出しで確認する（7.2節のpatch先出し確認に準じる）**
+  - 対象ファイル（パス）
+  - 実在する見出し・selector・シンボル
+  - 変更箇所と変更内容
+  - 変更根拠（include bundle上の該当行）
+  - 不明点がないこと、またはBQ
+  - この確認ができない場合はスクリプトを提示せず、必要なbundleまたはローカル実体確認を要求する
 
 ### 7.2 patchの運用
 
@@ -285,9 +292,6 @@ php -l <変更したPHPファイルのパス>
 
 # TypeScript / SCSS を変更した場合
 # → consult.local.md の「ビルドコマンド」セクションを参照。記載がない場合はBQで停止する
-
-# Markdownのみを変更した場合
-git diff --check
 ```
 
 **ステップ2：diff bundleを生成してAIに添付**
@@ -336,23 +340,19 @@ git status --short -- <path1> <path2> ...
 # 3. 対象ファイルだけをstagedにする
 git add <path1> <path2> ...
 
-# 4. staged差分の基本エラーを確認
-git diff --check --cached -- <path1> <path2> ...
-# 出力がなければ問題なし
+# 4. diff bundleを生成してAIに添付（8章ステップ2を参照）
 
-# 5. diff bundleを生成してAIに添付（8章ステップ2を参照）
-
-# 6. 問題がなければcommit
+# 5. 問題がなければcommit
 git commit -m "<type>(<scope>): <summary>"
 
-# 7. 状態確認
+# 6. 状態確認
 git status --short -- <path>
 git log --oneline -3
 
-# 8. push（monorepo全体）
+# 7. push（monorepo全体）
 git push origin master
 
-# 9. push後にHEADとorigin/masterの一致を確認
+# 8. push後にHEADとorigin/masterの一致を確認
 git log --oneline -3
 # HEAD -> master, origin/master, origin/HEAD が同じコミットを指していれば完了
 ```
