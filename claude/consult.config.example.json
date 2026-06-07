@@ -86,6 +86,6 @@
     "ai-consult-tools/claude/SECURITY.md",
     "ai-consult-tools/claude/consult.config.json",
     "ai-consult-tools/claude/consult.config.example.json",
-    "ai-consult-tools/claude/make_consult_bundle.ps1"
+    "ai-consult-tools/claude/consult_bundle_claude.py"
   ]
 }

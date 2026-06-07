@@ -1,13 +1,14 @@
-# 01 make_consult_bundle.ps1 技術仕様
+# 01 consult_bundle_claude.py 技術仕様
 
 > File: 01_make_consult_bundle_spec.md
-> Version: 1.0.0（make_consult_bundle.ps1 DocSet 202605260000 準拠）
+> Version: 2.0.0
+> Updated: 2026-06-07
 
 ---
 
 ## 概要
 
-`make_consult_bundle.ps1` は、Git管理されたローカルリポジトリからClaudeへの相談用バンドルMDを生成するPowerShell 7+スクリプトです。
+`consult_bundle_claude.py` は、Git管理されたローカルリポジトリからClaudeへの相談用バンドルMDを生成するPythonスクリプトです。
 
 出力は単一のMarkdownファイル（`<DocSet>_<Mode>[_<CaseName>].md`）です。
 300,000文字を超える場合は `_part1.md` / `_part2.md` に分割されます。
@@ -16,29 +17,30 @@
 
 ## 動作要件
 
-- PowerShell 7+（`pwsh`）必須。`powershell.exe`（Windows PowerShell 5.1）は非対応。
-- Git がインストールされ、`git` コマンドがPATHに通っていること。
-- 対象ディレクトリが `git init` 済みであること。
+- Python 3.9 以上
+- Git がインストールされ、`git` コマンドがPATHに通っていること
+- 対象ディレクトリが `git init` 済みであること（`diff` モードはコミット履歴が必要）
+- 外部ライブラリ不要（標準ライブラリのみで動作）
 
 ---
 
-## パラメータ一覧
+## 引数一覧
 
-| パラメータ | 型 | 必須 | 既定値 | 説明 |
-|---|---|---|---|---|
-| `-Mode` | string | ✓ | — | 動作モード（`map` / `repo` / `include` / `diff`） |
-| `-RepoRoot` | string | ✓ | — | リポジトリルートの絶対パス |
-| `-CaseName` | string | | `""` | 生成物ファイル名に付与する識別名 |
-| `-ConfigPath` | string | | `""` | 設定ファイルのパス（省略時は自動探索） |
-| `-IncludePaths` | string[] | | `@()` | includeモードで対象とするパス（複数指定可） |
-| `-Staged` | switch | | off | diffモードでstagd差分を対象にする |
-| `-UnstagedOnly` | switch | | off | diffモードでunstaged差分のみを対象にする |
-| `-DiffBase` | string | | `""` | diffモードの比較元ref（例：`HEAD~1`） |
-| `-DiffTarget` | string | | `""` | diffモードの比較先ref（例：`HEAD`） |
-| `-MaxCharsPerPart` | int | | `300000` | 1ファイルあたりの最大文字数 |
-| `-MaxCharsPerFile` | int | | `300000` | ファイル内容の最大文字数 |
-| `-AllowDocSetFolders` | switch | | off | DocSet管理フォルダを除外対象から外す（デバッグ用） |
-| `-Diag` | switch | | off | 診断出力を有効化（トラブルシュート用） |
+| 引数 | 必須 | 既定値 | 説明 |
+|---|---|---|---|
+| `--mode` | ✓ | — | 動作モード（`map` / `repo` / `include` / `diff`） |
+| `--repo-root` | ✓ | — | リポジトリルートのパス |
+| `--case-name` | | `""` | 生成物ファイル名に付与する識別名 |
+| `--config-path` | | `""` | 設定ファイルのパス（省略時は自動探索） |
+| `--include-paths` | | `[]` | includeモードで対象とするパス（スペース区切りで複数指定可） |
+| `--staged` | | off | diffモードでstaged差分を対象にする |
+| `--unstaged-only` | | off | diffモードでunstaged差分のみを対象にする |
+| `--diff-base` | | `""` | diffモードの比較元ref（例：`HEAD~1`） |
+| `--diff-target` | | `""` | diffモードの比較先ref（例：`HEAD`） |
+| `--max-chars-per-part` | | `300000` | 1ファイルあたりの最大文字数 |
+| `--max-chars-per-file` | | `300000` | ファイル内容の最大文字数 |
+| `--allow-docset-folders` | | off | DocSet管理フォルダを除外対象から外す（デバッグ用） |
+| `--diag` | | off | 診断出力を有効化（トラブルシュート用） |
 
 ---
 
@@ -52,25 +54,27 @@
 - ファイル本文は含まない
 - include対象の候補ファイルを洗い出すために最初に実行する
 
-```powershell
-pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode map -RepoRoot "C:\your-repo"
+```bash
+python consult_bundle_claude.py --mode map --repo-root <your-repo>
 ```
 
 ### include モード
 
-`-IncludePaths` で指定したファイル・フォルダを**本文付き**で出力します。
+`--include-paths` で指定したファイル・フォルダを**本文付き**で出力します。
 
 - 指定方法：絶対パス / リポジトリルートからの相対パス / フォルダ名のみ / ファイル名のみ
 - フォルダ名のみ・ファイル名のみ指定時：同名が複数ヒットした場合はエラー停止
 - ワイルドカード（`*` / `?` / `[]`）は非対応
-- 複数パスはカンマ区切りまたは配列で指定
+- 複数パスはスペース区切りで列挙する
 
-```powershell
-# 相対パス指定
-pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\your-repo" -IncludePaths "src\controllers","src\models"
+```bash
+# 相対パス指定（複数はスペース区切り）
+python consult_bundle_claude.py --mode include --repo-root <your-repo> \
+  --include-paths src/controllers src/models
 
 # ファイル名のみ指定（同名複数ヒット時は停止）
-pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\your-repo" -IncludePaths "App.php"
+python consult_bundle_claude.py --mode include --repo-root <your-repo> \
+  --include-paths App.php
 ```
 
 ### diff モード
@@ -82,19 +86,20 @@ Git差分を出力します。修正後のレビューに使います。
 | オプション | 差分スコープ | DiffArgs |
 |---|---|---|
 | 既定（オプションなし） | HEAD vs 作業ツリー | `diff --no-color --no-ext-diff HEAD` |
-| `-Staged` | HEAD vs ステージング | `diff --no-color --no-ext-diff --cached HEAD` |
-| `-UnstagedOnly` | ステージング vs 作業ツリー | `diff --no-color --no-ext-diff` |
-| `-DiffBase` + `-DiffTarget` | 指定ref間 | `diff --no-color --no-ext-diff <Base> <Target>` |
+| `--staged` | HEAD vs ステージング | `diff --no-color --no-ext-diff --staged HEAD` |
+| `--unstaged-only` | ステージング vs 作業ツリー | `diff --no-color --no-ext-diff` |
+| `--diff-base` + `--diff-target` | 指定ref間 | `diff --no-color --no-ext-diff <Base> <Target>` |
 
-```powershell
+```bash
 # 未コミット差分（既定）
-pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode diff -RepoRoot "C:\your-repo"
+python consult_bundle_claude.py --mode diff --repo-root <your-repo>
 
 # staged差分
-pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode diff -RepoRoot "C:\your-repo" -Staged
+python consult_bundle_claude.py --mode diff --repo-root <your-repo> --staged
 
 # ref間差分
-pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode diff -RepoRoot "C:\your-repo" -DiffBase HEAD~1 -DiffTarget HEAD
+python consult_bundle_claude.py --mode diff --repo-root <your-repo> \
+  --diff-base HEAD~1 --diff-target HEAD
 ```
 
 リネーム検出（`-M` オプション）は有効化されており、生成物のDiff Indexの `RenameDetection` 欄に記録されます。
@@ -107,8 +112,8 @@ pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode diff -RepoRoot 
 - 大規模リポジトリでは出力が大きくなるため、通常はmap→includeを優先する
 - mapでは不足する場合の広い参照として使用する
 
-```powershell
-pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode repo -RepoRoot "C:\your-repo"
+```bash
+python consult_bundle_claude.py --mode repo --repo-root <your-repo>
 ```
 
 ---
@@ -118,11 +123,11 @@ pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode repo -RepoRoot 
 スクリプトは起動時に設定ファイルを自動探索します。
 
 **探索順：**
-1. `-ConfigPath` で明示指定されたパス
-2. `<RepoRoot>\ai-consult-tools\claude\consult.config.json`
-3. `<RepoRoot>\.consult\consult.config.json`
+1. `--config-path` で明示指定されたパス
+2. `<RepoRoot>/ai-consult-tools/claude/consult.config.json`
+3. `<RepoRoot>/.consult/consult.config.json`
 
-設定ファイルが見つからない場合はデフォルト設定で動作します。
+設定ファイルが見つからない場合はエラーで停止します。`consult.config.example.json` をコピーして作成してください。
 
 ### 設定項目一覧
 
@@ -181,12 +186,13 @@ DocSetはバンドル生成時刻（JST）から自動生成されます。
 
 ---
 
-## 診断モード（-Diag）
+## 診断モード（--diag）
 
-`-Diag` スイッチを付けると、スクリプトの詳細なエラー情報をコンソールに出力します。
+`--diag` を付けると、スクリプトの詳細なエラー情報（スタックトレース）をコンソールに出力します。
 
 通常の相談フローでは使用しません。スクリプトが意図しないエラーで停止した場合のトラブルシュート時のみ使用してください。
 
-```powershell
-pwsh -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\your-repo" -IncludePaths "src" -Diag
+```bash
+python consult_bundle_claude.py --mode include --repo-root <your-repo> \
+  --include-paths src --diag
 ```

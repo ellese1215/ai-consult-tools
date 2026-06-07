@@ -9,22 +9,22 @@
 ## 1. ビルドコマンド
 
 TypeScript / SCSS を変更した後にCSSをビルドするコマンドを記載してください。
-AIは4.4節のGit確定ルーティンでこのコマンドを参照します。記載がない場合はBQで停止します。
+AIは00_ai_consult_operation_rules.md の8章でこのコマンドを参照します。記載がない場合はBQで停止します。
 
-```powershell
+```bash
 # 例1: npmワークスペース構成の場合
-cd C:\your-repo; npm run build --workspace=apps/webs/your-app
+cd <your-repo>; npm run build --workspace=apps/webs/your-app
 
 # 例2: プロジェクトルートで直接ビルドする場合
-cd C:\your-repo\apps\webs\your-app; npm run build
+cd <your-repo>/apps/webs/your-app; npm run build
 
 # 例3: その他のビルドツールの場合
-# cd C:\your-repo; <ビルドコマンド>
+# cd <your-repo>; <ビルドコマンド>
 ```
 
 **実際のビルドコマンド：**
 
-```powershell
+```bash
 # ここに実際のコマンドを記載してください
 ```
 
@@ -37,25 +37,38 @@ cd C:\your-repo\apps\webs\your-app; npm run build
 
 ### 基本（運用ルール + consult.local.md のみ）
 
-```powershell
-cd C:\your-repo; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\your-repo" -CaseName "<相談名>" -IncludePaths "ai-consult-tools/claude/00_ai_consult_operation_rules.md","ai-consult-tools/claude/consult.local.md"
+```bash
+cd <your-repo>; python consult_bundle_claude.py \
+  --mode include \
+  --repo-root <your-repo> \
+  --case-name "<相談名>" \
+  --include-paths \
+    "ai-consult-tools/claude/00_ai_consult_operation_rules.md" \
+    "ai-consult-tools/claude/consult.local.md"
 ```
 
 ### TODOドキュメント込み
 
-```powershell
+```bash
 # <TODOドキュメントのパス> を実際のパスに置き換えてください
-cd C:\your-repo; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\your-repo" -CaseName "<相談名>" -IncludePaths "ai-consult-tools/claude/00_ai_consult_operation_rules.md","ai-consult-tools/claude/consult.local.md","<TODOドキュメントのパス>"
+cd <your-repo>; python consult_bundle_claude.py \
+  --mode include \
+  --repo-root <your-repo> \
+  --case-name "<相談名>" \
+  --include-paths \
+    "ai-consult-tools/claude/00_ai_consult_operation_rules.md" \
+    "ai-consult-tools/claude/consult.local.md" \
+    "<TODOドキュメントのパス>"
 ```
 
 ### よく使うパターン（任意で追加）
 
-```powershell
+```bash
 # パターン1: <説明>
-# cd C:\your-repo; pwsh ... -IncludePaths "..."
+# cd <your-repo>; python consult_bundle_claude.py --mode include --repo-root <your-repo> --include-paths "..."
 
 # パターン2: <説明>
-# cd C:\your-repo; pwsh ... -IncludePaths "..."
+# cd <your-repo>; python consult_bundle_claude.py --mode include --repo-root <your-repo> --include-paths "..."
 ```
 
 ---

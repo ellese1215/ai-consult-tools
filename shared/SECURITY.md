@@ -1,9 +1,10 @@
 # SECURITY.md
 
 > File: SECURITY.md
-> Version: 1.0.0
+> Version: 1.1.0
+> Updated: 2026-06-07
 
-このファイルは、`make_consult_bundle.ps1` を使用する際のセキュリティ上の注意事項を説明します。
+このファイルは、`consult_bundle_claude.py` を使用する際のセキュリティ上の注意事項を説明します。
 
 ---
 

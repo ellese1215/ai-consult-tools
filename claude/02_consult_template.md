@@ -1,7 +1,8 @@
 # 02 Claude相談テンプレート
 
 > File: 02_consult_template.md
-> Version: 1.0.0
+> Version: 2.0.0
+> Updated: 2026-06-07
 
 このファイルは、Claudeへの相談スレッドを開始するときのテンプレートです。
 セクション番号はスレッド内で管理する番号です。適宜追記・更新してください。
@@ -25,8 +26,8 @@
 
 ## スレッド開始時のincludeコマンド（例）
 
-```powershell
-cd C:\your-repo; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-tools\claude\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\your-repo" -CaseName "<相談名>" -IncludePaths "ai-consult-tools/claude/00_ai_consult_operation_rules.md","<対象ファイルのパス>"
+```bash
+cd <your-repo>; python consult_bundle_claude.py --mode include --repo-root <your-repo> --case-name "<相談名>" --include-paths "ai-consult-tools/claude/00_ai_consult_operation_rules.md" "<対象ファイルのパス>"
 ```
 
 ---
