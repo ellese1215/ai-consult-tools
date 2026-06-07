@@ -124,7 +124,7 @@ python ai-consult-tools/claude/consult_bundle_claude.py --mode repo --repo-root 
 
 **探索順：**
 1. `--config-path` で明示指定されたパス
-2. `<RepoRoot>/ai-consult-tools/claude/consult.config.json`
+2. `<RepoRoot>/ai-consult-tools/local/claude/consult.config.json`
 3. `<RepoRoot>/.consult/consult.config.json`
 
 設定ファイルが見つからない場合はエラーで停止します。`consult.config.example.json` をコピーして作成してください。

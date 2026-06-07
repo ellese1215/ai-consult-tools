@@ -77,10 +77,10 @@
     "ai-consult-tools/claude/03_claude_session_guide.md",
     "ai-consult-tools/claude/README_release.md",
     "ai-consult-tools/shared/SECURITY.md",
-    "ai-consult-tools/claude/consult.config.json",
+    "ai-consult-tools/local/claude/consult.config.json",
     "ai-consult-tools/claude/consult.config.example.json",
     "ai-consult-tools/claude/consult_bundle_claude.py",
     "ai-consult-tools/shared/consult.local.example.md",
-    "ai-consult-tools/claude/consult.local.md"
+    "ai-consult-tools/local/claude/consult.local.md"
   ]
 }

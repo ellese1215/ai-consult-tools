@@ -37,19 +37,19 @@ ai-consult-tools/chatgpt/
 repo 全体確認用です。
 
 ```powershell
-cd C:\xampp\htdocs; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-tools\chatgpt\make_consult_bundle.ps1 -Mode repo -RepoRoot "C:\xampp\htdocs" -CaseName "repo_check"
+cd C:\xampp\htdocs; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-tools\archive\chatgpt\make_consult_bundle.ps1 -Mode repo -RepoRoot "C:\xampp\htdocs" -CaseName "repo_check"
 ```
 
 必要ファイルだけを束ねる include 用です。
 
 ```powershell
-cd C:\xampp\htdocs; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-tools\chatgpt\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\xampp\htdocs" -CaseName "include_check" -IncludePaths "ai-consult-tools/shared/00_ai_consult_operation_rules.md,ai-consult-tools/chatgpt/make_consult_bundle.ps1"
+cd C:\xampp\htdocs; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-tools\archive\chatgpt\make_consult_bundle.ps1 -Mode include -RepoRoot "C:\xampp\htdocs" -CaseName "include_check" -IncludePaths "ai-consult-tools/shared/00_ai_consult_operation_rules.md,ai-consult-tools/archive/chatgpt/make_consult_bundle.ps1"
 ```
 
 Git差分を束ねる diff 用です。
 
 ```powershell
-cd C:\xampp\htdocs; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-tools\chatgpt\make_consult_bundle.ps1 -Mode diff -RepoRoot "C:\xampp\htdocs" -CaseName "diff_check"
+cd C:\xampp\htdocs; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-tools\archive\chatgpt\make_consult_bundle.ps1 -Mode diff -RepoRoot "C:\xampp\htdocs" -CaseName "diff_check"
 ```
 
 ## 5. ConfigPath の扱い
@@ -57,14 +57,14 @@ cd C:\xampp\htdocs; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-too
 `-ConfigPath` を省略した場合、ツールは次の順に設定ファイルを探します。
 
 ```text
-1. ai-consult-tools/chatgpt/consult.config.json
+1. ai-consult-tools/local/chatgpt/consult.config_chatgpt.json
 2. .consult/consult.config.json
 ```
 
 明示する場合は次のように指定します。
 
 ```powershell
-cd C:\xampp\htdocs; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-tools\chatgpt\make_consult_bundle.ps1 -Mode repo -RepoRoot "C:\xampp\htdocs" -ConfigPath "ai-consult-tools\chatgpt\consult.config.json" -CaseName "repo_check"
+cd C:\xampp\htdocs; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-tools\archive\chatgpt\make_consult_bundle.ps1 -Mode repo -RepoRoot "C:\xampp\htdocs" -ConfigPath "ai-consult-tools\local\chatgpt\consult.config_chatgpt.json" -CaseName "repo_check"
 ```
 
 設定ファイルが見つからない場合、ツールは停止します。`consult.config.example.json` をコピーして `consult.config.json` を作成してください。
@@ -74,7 +74,7 @@ cd C:\xampp\htdocs; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-too
 `shared/consult.local.example.md` をコピーして `consult.local.md` を作成し、ビルドコマンド等を記載してください。
 
 ```powershell
-Copy-Item ai-consult-tools\chatgpt\consult.local.example.md ai-consult-tools\chatgpt\consult.local.md
+Copy-Item ai-consult-tools\chatgpt\consult.local.example.md ai-consult-tools\local\chatgpt\consult.local_chatgpt.md
 ```
 
 `consult.local.md` はGit管理外のため、コミットされません。スレッド開始時のinclude bundleに含めることで、ChatGPTがビルドコマンドを推測なく把握できます。
@@ -104,9 +104,9 @@ SECURITY.md
 差し替え後は、最低限 repo の default/config smoke を確認してください。
 
 ```powershell
-cd C:\xampp\htdocs; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-tools\chatgpt\make_consult_bundle.ps1 -Mode repo -RepoRoot "C:\xampp\htdocs" -CaseName "public_v150_default_smoke"
+cd C:\xampp\htdocs; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-tools\archive\chatgpt\make_consult_bundle.ps1 -Mode repo -RepoRoot "C:\xampp\htdocs" -CaseName "public_v150_default_smoke"
 ```
 
 ```powershell
-cd C:\xampp\htdocs; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-tools\chatgpt\make_consult_bundle.ps1 -Mode repo -RepoRoot "C:\xampp\htdocs" -ConfigPath "ai-consult-tools\chatgpt\consult.config.json" -CaseName "public_v150_config_smoke"
+cd C:\xampp\htdocs; pwsh -NoProfile -ExecutionPolicy Bypass -File ai-consult-tools\archive\chatgpt\make_consult_bundle.ps1 -Mode repo -RepoRoot "C:\xampp\htdocs" -ConfigPath "ai-consult-tools\local\chatgpt\consult.config_chatgpt.json" -CaseName "public_v150_config_smoke"
 ```

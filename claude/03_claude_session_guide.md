@@ -21,7 +21,7 @@ cd <your-repo>; python ai-consult-tools/claude/consult_bundle_claude.py \
   --case-name "<相談名>" \
   --include-paths \
     "ai-consult-tools/shared/00_ai_consult_operation_rules.md" \
-    "ai-consult-tools/claude/consult.local.md" \
+    "ai-consult-tools/local/claude/consult.local.md" \
     "<対象ファイルのパス>"
 ```
 

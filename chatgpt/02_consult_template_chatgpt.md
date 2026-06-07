@@ -160,7 +160,7 @@ AIは必ず次を実施してください（この順で）：
 - 実行コマンド（map: 実行済）：
 
 ```powershell
-pwsh -File tools\chatgpt\make_consult_bundle.ps1 -Mode map -CaseName "php_rename_unique" -RepoRoot "C:\xampp\htdocs"
+pwsh -File ai-consult-tools\archive\chatgpt\make_consult_bundle.ps1 -Mode map -CaseName "php_rename_unique" -RepoRoot "C:\xampp\htdocs"
 ```
 
 - コマンド例（repo/include/diff: この時点では未実行、必要になったら実行して追記）
@@ -168,13 +168,13 @@ pwsh -File tools\chatgpt\make_consult_bundle.ps1 -Mode map -CaseName "php_rename
 ```powershell
 # repo（mapでは不足する場合の本文付き横断スナップショット）
 
-pwsh -File tools/chatgpt/make_consult_bundle.ps1 -Mode repo -RepoRoot "C:\xampp\htdocs"
+pwsh -File ai-consult-tools/archive/chatgpt/make_consult_bundle.ps1 -Mode repo -RepoRoot "C:\xampp\htdocs"
 
 # include（ファイル名のみ/フォルダ名のみ指定：v1.4.5）
 
 ## 例（フォルダ名のみ）
 
-pwsh -File tools/chatgpt/make_consult_bundle.ps1 `
+pwsh -File ai-consult-tools/archive/chatgpt/make_consult_bundle.ps1 `
   -Mode include `
   -RepoRoot "C:\xampp\htdocs" `
   -CaseName "only_public_html" `
@@ -184,7 +184,7 @@ pwsh -File tools/chatgpt/make_consult_bundle.ps1 `
 
 # diff（実装後の差分レビュー）
 
-pwsh -File tools\chatgpt\make_consult_bundle.ps1 -Mode diff -RepoRoot "C:\xampp\htdocs"
+pwsh -File ai-consult-tools\archive\chatgpt\make_consult_bundle.ps1 -Mode diff -RepoRoot "C:\xampp\htdocs"
 ```
 
 - 結果ログ：(貼り付け)

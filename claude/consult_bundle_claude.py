@@ -15,28 +15,28 @@ Description:
 Usage examples:
 
   # Mode D: map（本文なし軽量地図）
-  python make_consult_bundle.py --mode map --repo-root /path/to/repo
+  python ai-consult-tools/claude/consult_bundle_claude.py --mode map --repo-root /path/to/repo
 
   # Mode C: repo（全体横断スナップショット）
-  python make_consult_bundle.py --mode repo --repo-root /path/to/repo
+  python ai-consult-tools/claude/consult_bundle_claude.py --mode repo --repo-root /path/to/repo
 
   # 設定ファイルを明示する例
-  python make_consult_bundle.py --mode repo --repo-root /path/to/repo --config-path .consult/consult.config.json
+  python ai-consult-tools/claude/consult_bundle_claude.py --mode repo --repo-root /path/to/repo --config-path .consult/consult.config.json
 
   # Mode A: include（範囲指定スナップショット）
-  python make_consult_bundle.py --mode include --repo-root /path/to/repo --include-paths common admin db/schema
+  python ai-consult-tools/claude/consult_bundle_claude.py --mode include --repo-root /path/to/repo --include-paths common admin db/schema
 
   # ファイル名のみ指定
-  python make_consult_bundle.py --mode include --repo-root /path/to/repo --include-paths Navigation.php Loader.php
+  python ai-consult-tools/claude/consult_bundle_claude.py --mode include --repo-root /path/to/repo --include-paths Navigation.php Loader.php
 
   # Mode B: diff（差分バンドル）
-  python make_consult_bundle.py --mode diff --repo-root /path/to/repo
+  python ai-consult-tools/claude/consult_bundle_claude.py --mode diff --repo-root /path/to/repo
 
   # staged 差分
-  python make_consult_bundle.py --mode diff --repo-root /path/to/repo --staged
+  python ai-consult-tools/claude/consult_bundle_claude.py --mode diff --repo-root /path/to/repo --staged
 
   # ref 間差分
-  python make_consult_bundle.py --mode diff --repo-root /path/to/repo --diff-base HEAD~1 --diff-target HEAD
+  python ai-consult-tools/claude/consult_bundle_claude.py --mode diff --repo-root /path/to/repo --diff-base HEAD~1 --diff-target HEAD
 """
 
 import argparse
@@ -57,7 +57,7 @@ from pathlib import Path
 JST = timezone(timedelta(hours=9))
 
 DEFAULT_CONFIG_REL_CANDIDATES = [
-    "ai-consult-tools/claude/consult.config.json",
+    "ai-consult-tools/local/claude/consult.config.json",
     ".consult/consult.config.json",
 ]
 
@@ -248,7 +248,7 @@ def resolve_consult_config_path(repo_full: Path, config_path: str) -> Path:
     print("以下のいずれかを実行してください：", file=sys.stderr)
     print("  1. consult.config.example.json をコピーして consult.config.json を作成する", file=sys.stderr)
     print("  2. --config-path オプションで設定ファイルのパスを明示する", file=sys.stderr)
-    print(f"     例: --config-path \"ai-consult-tools/claude/consult.config.json\"", file=sys.stderr)
+    print(f"     例: --config-path \"ai-consult-tools/local/claude/consult.config.json\"", file=sys.stderr)
     print("", file=sys.stderr)
     print(f"探索したパス: {candidates_text}", file=sys.stderr)
     print("", file=sys.stderr)

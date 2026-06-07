@@ -72,10 +72,10 @@ your-repo/
 
 ```bash
 # Mac / Linux
-cp ai-consult-tools/claude/consult.config.example.json ai-consult-tools/claude/consult.config.json
+cp ai-consult-tools/claude/consult.config.example.json ai-consult-tools/local/claude/consult.config.json
 
 # Windows (PowerShell)
-Copy-Item ai-consult-tools\claude\consult.config.example.json ai-consult-tools\claude\consult.config.json
+Copy-Item ai-consult-tools\claude\consult.config.example.json ai-consult-tools\local\claude\consult.config.json
 ```
 
 主な設定項目：
@@ -96,10 +96,10 @@ Copy-Item ai-consult-tools\claude\consult.config.example.json ai-consult-tools\c
 
 ```bash
 # Mac / Linux
-cp ai-consult-tools/shared/consult.local.example.md ai-consult-tools/claude/consult.local.md
+cp ai-consult-tools/shared/consult.local.example.md ai-consult-tools/local/claude/consult.local.md
 
 # Windows (PowerShell)
-Copy-Item ai-consult-tools\shared\consult.local.example.md ai-consult-tools\claude\consult.local.md
+Copy-Item ai-consult-tools\shared\consult.local.example.md ai-consult-tools\local\claude\consult.local.md
 ```
 
 `consult.local.md` はGit管理外のため、コミットされません。スレッド開始時のinclude bundleに含めることで、AIがビルドコマンドを推測なく把握できます。
@@ -110,7 +110,7 @@ Copy-Item ai-consult-tools\shared\consult.local.example.md ai-consult-tools\clau
 
 ```
 ai-consult-tools/claude/consult_case/
-ai-consult-tools/claude/consult.local.md
+ai-consult-tools/local/claude/consult.local.md
 ```
 
 ---

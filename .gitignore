@@ -13,21 +13,14 @@ chatgpt/consult.local.md
 
 # BEGIN ai-consult-tools generated/local artifacts
 
-# Local private configuration
-claude/consult.config.json
-chatgpt/consult.config_chatgpt.json
-claude/consult.local.md
-chatgpt/consult.local_chatgpt.md
+# Local private configuration and local-only archives
+local/
+archive/
 
 # Generated consult cases
 claude/consult_case/
 chatgpt/consult_case/
 consult_case/
 consult_project/
-
-# Generated or backup archives
-claude/consult_bundle_claude.zip
-chatgpt/consult_bundle_chatgpt.zip
-claude/claude_bk.zip
 
 # END ai-consult-tools generated/local artifacts

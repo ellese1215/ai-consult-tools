@@ -15,32 +15,32 @@ Description:
 Usage examples:
 
   # Mode D: map（本文なし軽量地図）
-  python consult_bundle_chatgpt.py --mode map --repo-root /path/to/repo
+  python ai-consult-tools/chatgpt/consult_bundle_chatgpt.py --mode map --repo-root /path/to/repo
 
   # Mode C: repo（全体横断スナップショット）
-  python consult_bundle_chatgpt.py --mode repo --repo-root /path/to/repo
+  python ai-consult-tools/chatgpt/consult_bundle_chatgpt.py --mode repo --repo-root /path/to/repo
 
-  # 設定ファイルを明示する例（未指定時は ai-consult-tools/chatgpt/consult.config.json →
+  # 設定ファイルを明示する例（未指定時は ai-consult-tools/local/chatgpt/consult.config_chatgpt.json →
   #   .consult/consult.config.json の順に自動探索）
-  python consult_bundle_chatgpt.py --mode repo --repo-root /path/to/repo \\
+  python ai-consult-tools/chatgpt/consult_bundle_chatgpt.py --mode repo --repo-root /path/to/repo \\
       --config-path .consult/consult.config.json
 
   # Mode A: include（範囲指定スナップショット）
-  python consult_bundle_chatgpt.py --mode include --repo-root /path/to/repo \\
+  python ai-consult-tools/chatgpt/consult_bundle_chatgpt.py --mode include --repo-root /path/to/repo \\
       --include-paths common admin db/schema
 
   # ファイル名のみ指定
-  python consult_bundle_chatgpt.py --mode include --repo-root /path/to/repo \\
+  python ai-consult-tools/chatgpt/consult_bundle_chatgpt.py --mode include --repo-root /path/to/repo \\
       --include-paths Navigation.php Loader.php
 
   # Mode B: diff（差分バンドル）
-  python consult_bundle_chatgpt.py --mode diff --repo-root /path/to/repo
+  python ai-consult-tools/chatgpt/consult_bundle_chatgpt.py --mode diff --repo-root /path/to/repo
 
   # staged 差分
-  python consult_bundle_chatgpt.py --mode diff --repo-root /path/to/repo --staged
+  python ai-consult-tools/chatgpt/consult_bundle_chatgpt.py --mode diff --repo-root /path/to/repo --staged
 
   # ref 間差分
-  python consult_bundle_chatgpt.py --mode diff --repo-root /path/to/repo \\
+  python ai-consult-tools/chatgpt/consult_bundle_chatgpt.py --mode diff --repo-root /path/to/repo \\
       --diff-base HEAD~1 --diff-target HEAD
 """
 
@@ -63,7 +63,7 @@ from pathlib import Path
 JST = timezone(timedelta(hours=9))
 
 DEFAULT_CONFIG_REL_CANDIDATES = [
-    "ai-consult-tools/chatgpt/consult.config.json",
+    "ai-consult-tools/local/chatgpt/consult.config_chatgpt.json",
     ".consult/consult.config.json",
 ]
 
@@ -252,9 +252,9 @@ def resolve_consult_config_path(repo_full: Path, config_path: str) -> Path:
     print("", file=sys.stderr)
     print("以下のいずれかを実行してください：", file=sys.stderr)
     print("  1. consult.config.example.json をコピーして consult.config.json を作成する", file=sys.stderr)
-    print("     例: cp ai-consult-tools/chatgpt/consult.config.example.json ai-consult-tools/chatgpt/consult.config.json", file=sys.stderr)
+    print("     例: cp ai-consult-tools/chatgpt/consult.config.example_chatgpt.json ai-consult-tools/local/chatgpt/consult.config_chatgpt.json", file=sys.stderr)
     print("  2. --config-path オプションで設定ファイルのパスを明示する", file=sys.stderr)
-    print(f"     例: --config-path \"ai-consult-tools/chatgpt/consult.config.json\"", file=sys.stderr)
+    print(f"     例: --config-path \"ai-consult-tools/local/chatgpt/consult.config_chatgpt.json\"", file=sys.stderr)
     print("", file=sys.stderr)
     print(f"探索したパス: {candidates_text}", file=sys.stderr)
     print("", file=sys.stderr)
