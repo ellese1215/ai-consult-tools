@@ -2,7 +2,7 @@
 """
 consult_bundle_chatgpt.py
 - ChatGPT相談用スナップショット/差分バンドル生成（仕様 v1.6.2 準拠）
-- Python port of make_consult_bundle.ps1 (ChatGPT版)
+- Python bundle generator for ChatGPT (ChatGPT版)
 - Updated: 2026-06-07
 
 Description:
