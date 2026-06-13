@@ -1,10 +1,10 @@
 # 00 AI相談運用ルール
 
 > File: 00_ai_consult_operation_rules.md
-> Updated: 2026-06-07
-> DocSet: 202606070000
-> Version: 3.1.3
-> Note: v3.1.3 では7.2節にコマンド完全性確認ルール、7.3節にパッチスクリプト生成前の改行コードバイト確認ルールを追加。
+> Updated: 2026-06-14
+> DocSet: 202606140000
+> Version: 3.1.4
+> Note: v3.1.4 では8章・9章に、diff bundle生成前の対象ファイルstage確認と未追跡ファイル残存時の停止ルールを追加。
 
 ---
 
@@ -296,7 +296,28 @@ php -l <変更したPHPファイルのパス>
 # → consult.local.md の「ビルドコマンド」セクションを参照。記載がない場合はBQで停止する
 ```
 
-**ステップ2：diff bundleを生成してAIに添付**
+**ステップ2：対象ファイルをstageしてdiff bundleを生成・添付**
+
+差分確認前に、今回対象のファイルだけをstageし、未追跡ファイルが残っていないことを確認する。
+
+- 新規ファイル・移動先ファイル・`.gitkeep` などが `??` のまま残っている場合、diff bundleへ進まない
+- 削除・rename・新規作成を同時に含む場合は、対象パスを限定した `git add -A -- <対象パス>` を使用してよい
+- ただし、repo root全体を対象にした `git add -A` や `git add .` は引き続き禁止
+- stage後、必ず `git status --short --untracked-files=all -- <対象パス>` を確認し、今回対象ファイルが `??` として残っていないことを確認する
+
+例：
+
+```bash
+# 対象ファイルを明示できる場合
+git add <path1> <path2> ...
+git status --short --untracked-files=all -- <path1> <path2> ...
+
+# 新規・削除・renameを含むディレクトリ単位の変更の場合
+git add -A -- <target-directory>
+git status --short --untracked-files=all -- <target-directory>
+```
+
+上記確認後、diff bundleを生成する。
 
 【Claude】
 ```bash
@@ -341,6 +362,12 @@ git status --short -- <path1> <path2> ...
 
 # 3. 対象ファイルだけをstagedにする
 git add <path1> <path2> ...
+# 新規・削除・renameを含む場合は対象パス限定で使用可
+git add -A -- <target-directory>
+
+# 3-1. 対象の未追跡ファイルが残っていないことを確認
+git status --short --untracked-files=all -- <path1> <path2> ...
+# 今回対象の新規ファイルが ?? のままなら、diff bundleへ進まずstageをやり直す
 
 # 4. diff bundleを生成してAIに添付（8章ステップ2を参照）
 
@@ -360,7 +387,9 @@ git log --oneline -3
 ```
 
 **注意：**
-- `git add .`・`git add -A`・対象外ファイルを含む一括addは原則禁止
+- `git add .`・repo root全体を対象にした `git add -A`・対象外ファイルを含む一括addは原則禁止
+- 新規・削除・renameを含む場合のみ、対象パスを限定した `git add -A -- <対象パス>` は使用してよい
+- diff bundle生成前に、今回対象の新規ファイル・移動先ファイル・`.gitkeep` が `??` のまま残っている場合は停止し、stageをやり直す
 - consult_case配下（`ai-consult-tools/consult_case/`）はユーザーが明示しない限り削除しない
 - push前に別件差分や未追跡ファイルが見えても、今回対象でないものは勝手に整理・削除・stageしない
 - commit / pushを行わずに終了する場合は、その理由と未完了の次手順を明記する
