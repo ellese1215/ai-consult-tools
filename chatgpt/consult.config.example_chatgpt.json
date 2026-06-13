@@ -1,4 +1,5 @@
 {
+  "_comment": "consult.config.example_chatgpt.json - consult.config_chatgpt.json のテンプレートです。コピーして local/chatgpt/consult.config_chatgpt.json を作成し、あなたの環境に合わせて編集してください。allowedToolIncludeFiles の local/ 系エントリは、local/chatgpt/ 配下に実設定を置いた場合の例です。",
   "outRoot": "ai-consult-tools/chatgpt/consult_case",
   "ruleFile": "ai-consult-tools/shared/00_ai_consult_operation_rules.md",
   "excludeFolders": [
@@ -98,15 +99,16 @@
   ],
   "allowedToolIncludeFiles": [
     "ai-consult-tools/shared/00_ai_consult_operation_rules.md",
-    "ai-consult-tools/shared/SECURITY.md",
-    "ai-consult-tools/shared/consult.local.example.md",
     "ai-consult-tools/chatgpt/01_make_consult_bundle_spec_chatgpt.md",
     "ai-consult-tools/chatgpt/02_consult_template_chatgpt.md",
     "ai-consult-tools/chatgpt/09_consult_test_command_chatgpt.md",
     "ai-consult-tools/chatgpt/README_release_chatgpt.md",
-    "ai-consult-tools/chatgpt/consult.config.example_chatgpt.json",
-    "ai-consult-tools/chatgpt/consult_bundle_chatgpt.py",
+    "ai-consult-tools/chatgpt/03_chatgpt_session_guide.md",
+    "ai-consult-tools/shared/SECURITY.md",
     "ai-consult-tools/local/chatgpt/consult.config_chatgpt.json",
+    "ai-consult-tools/chatgpt/consult.config.example_chatgpt.json",
+    "ai-consult-tools/shared/consult.local.example.md",
+    "ai-consult-tools/chatgpt/consult_bundle_chatgpt.py",
     "ai-consult-tools/local/chatgpt/consult.local_chatgpt.md"
   ]
 }

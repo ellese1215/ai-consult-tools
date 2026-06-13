@@ -37,38 +37,70 @@ cd <your-repo>/apps/webs/your-app; npm run build
 
 ### 基本（運用ルール + consult.local.md のみ）
 
+**【Claude版】**
+
 ```bash
-cd <your-repo>; python consult_bundle_claude.py \
+cd <your-repo>; python ai-consult-tools/claude/consult_bundle_claude.py \
   --mode include \
   --repo-root <your-repo> \
   --case-name "<相談名>" \
   --include-paths \
-    "ai-consult-tools/claude/00_ai_consult_operation_rules.md" \
-    "ai-consult-tools/claude/consult.local.md"
+    "ai-consult-tools/shared/00_ai_consult_operation_rules.md" \
+    "ai-consult-tools/local/claude/consult.local.md"
+```
+
+**【ChatGPT版】**
+
+```powershell
+cd C:\xampp\htdocs
+python .\ai-consult-tools\chatgpt\consult_bundle_chatgpt.py `
+  --mode include `
+  --repo-root "C:\xampp\htdocs" `
+  --case-name "<相談名>" `
+  --include-paths `
+    "ai-consult-tools/shared/00_ai_consult_operation_rules.md" `
+    "ai-consult-tools/local/chatgpt/consult.local_chatgpt.md"
 ```
 
 ### TODOドキュメント込み
 
+**【Claude版】**
+
 ```bash
 # <TODOドキュメントのパス> を実際のパスに置き換えてください
-cd <your-repo>; python consult_bundle_claude.py \
+cd <your-repo>; python ai-consult-tools/claude/consult_bundle_claude.py \
   --mode include \
   --repo-root <your-repo> \
   --case-name "<相談名>" \
   --include-paths \
-    "ai-consult-tools/claude/00_ai_consult_operation_rules.md" \
-    "ai-consult-tools/claude/consult.local.md" \
+    "ai-consult-tools/shared/00_ai_consult_operation_rules.md" \
+    "ai-consult-tools/local/claude/consult.local.md" \
+    "<TODOドキュメントのパス>"
+```
+
+**【ChatGPT版】**
+
+```powershell
+# <TODOドキュメントのパス> を実際のパスに置き換えてください
+cd C:\xampp\htdocs
+python .\ai-consult-tools\chatgpt\consult_bundle_chatgpt.py `
+  --mode include `
+  --repo-root "C:\xampp\htdocs" `
+  --case-name "<相談名>" `
+  --include-paths `
+    "ai-consult-tools/shared/00_ai_consult_operation_rules.md" `
+    "ai-consult-tools/local/chatgpt/consult.local_chatgpt.md" `
     "<TODOドキュメントのパス>"
 ```
 
 ### よく使うパターン（任意で追加）
 
 ```bash
-# パターン1: <説明>
-# cd <your-repo>; python consult_bundle_claude.py --mode include --repo-root <your-repo> --include-paths "..."
+# 【Claude版】パターン1: <説明>
+# cd <your-repo>; python ai-consult-tools/claude/consult_bundle_claude.py --mode include --repo-root <your-repo> --include-paths "..."
 
-# パターン2: <説明>
-# cd <your-repo>; python consult_bundle_claude.py --mode include --repo-root <your-repo> --include-paths "..."
+# 【ChatGPT版】パターン1: <説明>
+# cd C:\xampp\htdocs; python .\ai-consult-tools\chatgpt\consult_bundle_chatgpt.py --mode include --repo-root "C:\xampp\htdocs" --include-paths "..."
 ```
 
 ---

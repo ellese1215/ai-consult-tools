@@ -1,5 +1,5 @@
 {
-  "_comment": "consult.config.example.json - consult.config.json のテンプレートです。コピーして consult.config.json を作成し、あなたの環境に合わせて編集してください。",
+  "_comment": "consult.config.example.json - consult.config.json のテンプレートです。コピーして local/claude/consult.config.json を作成し、あなたの環境に合わせて編集してください。allowedToolIncludeFiles の local/ 系エントリは、local/claude/ 配下に実設定を置いた場合の例です。",
   "outRoot": "ai-consult-tools/claude/consult_case",
   "ruleFile": "ai-consult-tools/shared/00_ai_consult_operation_rules.md",
   "excludeFolders": [

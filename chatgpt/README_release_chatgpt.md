@@ -42,8 +42,17 @@ ai-consult-tools/
 
 公開用テンプレートから、Git管理外の実設定を作成します。
 
+まず `local/chatgpt/` ディレクトリを作成します。
+
 ```powershell
-cd C:\xampp\htdocs
+cd <your-repo>
+New-Item -ItemType Directory -Force -Path ai-consult-tools\local\chatgpt
+```
+
+次に設定ファイルをコピーします。
+
+```powershell
+cd <your-repo>
 Copy-Item .\ai-consult-tools\chatgpt\consult.config.example_chatgpt.json .\ai-consult-tools\local\chatgpt\consult.config_chatgpt.json
 Copy-Item .\ai-consult-tools\shared\consult.local.example.md .\ai-consult-tools\local\chatgpt\consult.local_chatgpt.md
 ```
@@ -54,34 +63,34 @@ Copy-Item .\ai-consult-tools\shared\consult.local.example.md .\ai-consult-tools\
 
 ## 3. 基本コマンド
 
-すべて `C:\xampp\htdocs` から実行します。
+すべてリポジトリルート（`<your-repo>`）から実行します。
 
 ### map
 
 ```powershell
-cd C:\xampp\htdocs
-python .\ai-consult-tools\chatgpt\consult_bundle_chatgpt.py --mode map --repo-root "C:\xampp\htdocs" --case-name "map_check"
+cd <your-repo>
+python .\ai-consult-tools\chatgpt\consult_bundle_chatgpt.py --mode map --repo-root "<your-repo>" --case-name "map_check"
 ```
 
 ### include
 
 ```powershell
-cd C:\xampp\htdocs
-python .\ai-consult-tools\chatgpt\consult_bundle_chatgpt.py --mode include --repo-root "C:\xampp\htdocs" --case-name "include_check" --include-paths "ai-consult-tools/shared/00_ai_consult_operation_rules.md" "ai-consult-tools/local/chatgpt/consult.local_chatgpt.md"
+cd <your-repo>
+python .\ai-consult-tools\chatgpt\consult_bundle_chatgpt.py --mode include --repo-root "<your-repo>" --case-name "include_check" --include-paths "ai-consult-tools/shared/00_ai_consult_operation_rules.md" "ai-consult-tools/local/chatgpt/consult.local_chatgpt.md"
 ```
 
 ### diff
 
 ```powershell
-cd C:\xampp\htdocs
-python .\ai-consult-tools\chatgpt\consult_bundle_chatgpt.py --mode diff --repo-root "C:\xampp\htdocs" --case-name "diff_check"
+cd <your-repo>
+python .\ai-consult-tools\chatgpt\consult_bundle_chatgpt.py --mode diff --repo-root "<your-repo>" --case-name "diff_check"
 ```
 
 ### repo
 
 ```powershell
-cd C:\xampp\htdocs
-python .\ai-consult-tools\chatgpt\consult_bundle_chatgpt.py --mode repo --repo-root "C:\xampp\htdocs" --case-name "repo_check"
+cd <your-repo>
+python .\ai-consult-tools\chatgpt\consult_bundle_chatgpt.py --mode repo --repo-root "<your-repo>" --case-name "repo_check"
 ```
 
 ---
@@ -98,8 +107,8 @@ ai-consult-tools/local/chatgpt/consult.config_chatgpt.json
 明示する場合は以下です。
 
 ```powershell
-cd C:\xampp\htdocs
-python .\ai-consult-tools\chatgpt\consult_bundle_chatgpt.py --mode include --repo-root "C:\xampp\htdocs" --config-path "ai-consult-tools/local/chatgpt/consult.config_chatgpt.json" --case-name "config_check" --include-paths "ai-consult-tools/local/chatgpt/consult.config_chatgpt.json" "ai-consult-tools/local/chatgpt/consult.local_chatgpt.md"
+cd <your-repo>
+python .\ai-consult-tools\chatgpt\consult_bundle_chatgpt.py --mode include --repo-root "<your-repo>" --config-path "ai-consult-tools/local/chatgpt/consult.config_chatgpt.json" --case-name "config_check" --include-paths "ai-consult-tools/local/chatgpt/consult.config_chatgpt.json" "ai-consult-tools/local/chatgpt/consult.local_chatgpt.md"
 ```
 
 ---

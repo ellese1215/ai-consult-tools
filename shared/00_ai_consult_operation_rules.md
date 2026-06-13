@@ -3,8 +3,8 @@
 > File: 00_ai_consult_operation_rules.md
 > Updated: 2026-06-07
 > DocSet: 202606070000
-> Version: 3.1.0
-> Note: v3.1.0 はClaude版・ChatGPT版共通。AI固有の差異は各節内に【Claude】【ChatGPT】ラベルで明示する。
+> Version: 3.1.2
+> Note: v3.1.2 では7.1節に`.py`スクリプト生成前の先出し確認ルールを追加、8章・9章から `git diff --check` を削除。
 
 ---
 
@@ -21,8 +21,12 @@ AI固有の記述には以下のラベルを付ける。ラベルのない記述
 ## 0. この文書の位置づけ
 
 - 本書（00）は **AI相談の運用ルール**（推測禁止、参照確定、進め方、回帰防止）を定義する。
-- スクリプトの技術仕様（引数・出力・フォーマット・除外規則）は `01_make_consult_bundle_spec.md` を参照。
-- セッション開始手順・モード選択の判断基準は `03_claude_session_guide.md` を参照。
+- スクリプトの技術仕様（引数・出力・フォーマット・除外規則）：
+  - **【Claude】** `claude/01_make_consult_bundle_spec.md` を参照。
+  - **【ChatGPT】** `chatgpt/01_make_consult_bundle_spec_chatgpt.md` を参照。
+- セッション開始手順・モード選択の判断基準：
+  - **【Claude】** `claude/03_claude_session_guide.md` を参照。
+  - **【ChatGPT】** `chatgpt/03_chatgpt_session_guide.md` を参照。
 
 ---
 
@@ -201,6 +205,13 @@ AIは影響範囲チェックの結果として次を提示する：
 - **ファイルの書き換え・新規作成は、コードブロックではなく `.py` スクリプトファイルとして提示する（7.3節参照）**
   - コードブロックは、実行コマンド例・参照用コード断片・AI内容確認用にとどめる
   - 「コードブロックで全文提示した」だけではスクリプト提示の義務を果たしたことにならない
+- **`.py` スクリプト生成前に以下を先出しで確認する（7.2節のpatch先出し確認に準じる）**
+  - 対象ファイル（パス）
+  - 実在する見出し・selector・シンボル
+  - 変更箇所と変更内容
+  - 変更根拠（include bundle上の該当行）
+  - 不明点がないこと、またはBQ
+  - この確認ができない場合はスクリプトを提示せず、必要なbundleまたはローカル実体確認を要求する
 
 ### 7.2 patchの運用
 
@@ -281,22 +292,19 @@ php -l <変更したPHPファイルのパス>
 
 # TypeScript / SCSS を変更した場合
 # → consult.local.md の「ビルドコマンド」セクションを参照。記載がない場合はBQで停止する
-
-# Markdownのみを変更した場合
-git diff --check
 ```
 
 **ステップ2：diff bundleを生成してAIに添付**
 
 【Claude】
 ```bash
-cd <your-repo>; python consult_bundle_claude.py --mode diff --repo-root <your-repo> --case-name "<相談名>"
+cd <your-repo>; python ai-consult-tools/claude/consult_bundle_claude.py --mode diff --repo-root <your-repo> --case-name "<相談名>"
 ```
 生成された `.md` ファイルをAIに添付する。
 
 【ChatGPT】
 ```bash
-cd <your-repo>; python consult_bundle_chatgpt.py --mode diff --repo-root <your-repo> --case-name "<相談名>"
+cd <your-repo>; python ai-consult-tools/chatgpt/consult_bundle_chatgpt.py --mode diff --repo-root <your-repo> --case-name "<相談名>"
 ```
 生成された ZIP をAIに添付する。
 
@@ -332,23 +340,19 @@ git status --short -- <path1> <path2> ...
 # 3. 対象ファイルだけをstagedにする
 git add <path1> <path2> ...
 
-# 4. staged差分の基本エラーを確認
-git diff --check --cached -- <path1> <path2> ...
-# 出力がなければ問題なし
+# 4. diff bundleを生成してAIに添付（8章ステップ2を参照）
 
-# 5. diff bundleを生成してAIに添付（8章ステップ2を参照）
-
-# 6. 問題がなければcommit
+# 5. 問題がなければcommit
 git commit -m "<type>(<scope>): <summary>"
 
-# 7. 状態確認
+# 6. 状態確認
 git status --short -- <path>
 git log --oneline -3
 
-# 8. push（monorepo全体）
+# 7. push（monorepo全体）
 git push origin master
 
-# 9. push後にHEADとorigin/masterの一致を確認
+# 8. push後にHEADとorigin/masterの一致を確認
 git log --oneline -3
 # HEAD -> master, origin/master, origin/HEAD が同じコミットを指していれば完了
 ```
@@ -403,12 +407,12 @@ TODOドキュメントの更新なしに引き継ぎ文を作成しない。
 
 【Claude】
 ```bash
-cd <your-repo>; python consult_bundle_claude.py --mode include --repo-root <your-repo> --case-name "<相談名>" --include-paths "ai-consult-tools/00_ai_consult_operation_rules.md" "ai-consult-tools/consult.local.md" "<TODOドキュメントのパス>" "<現在作業に必要な実ファイル>"
+cd <your-repo>; python ai-consult-tools/claude/consult_bundle_claude.py --mode include --repo-root <your-repo> --case-name "<相談名>" --include-paths "ai-consult-tools/shared/00_ai_consult_operation_rules.md" "ai-consult-tools/local/claude/consult.local.md" "<TODOドキュメントのパス>" "<現在作業に必要な実ファイル>"
 ```
 
 【ChatGPT】
 ```bash
-cd <your-repo>; python consult_bundle_chatgpt.py --mode include --repo-root <your-repo> --case-name "<相談名>" --include-paths "ai-consult-tools/00_ai_consult_operation_rules.md" "ai-consult-tools/consult.local.md" "<TODOドキュメントのパス>" "<現在作業に必要な実ファイル>"
+cd <your-repo>; python ai-consult-tools/chatgpt/consult_bundle_chatgpt.py --mode include --repo-root <your-repo> --case-name "<相談名>" --include-paths "ai-consult-tools/shared/00_ai_consult_operation_rules.md" "ai-consult-tools/local/chatgpt/consult.local_chatgpt.md" "<TODOドキュメントのパス>" "<現在作業に必要な実ファイル>"
 ```
 
 include生成コマンドは引き継ぎ本文と混在させない。コマンド単体のコードブロックとして単独で先に出すこと。

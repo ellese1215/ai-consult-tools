@@ -25,14 +25,17 @@ ai-consult-tools/
 │   ├── 00_ai_consult_operation_rules.md  # Claude / ChatGPT 共通の運用ルール
 │   ├── consult.local.example.md          # プロジェクト固有設定のテンプレート
 │   └── SECURITY.md                       # セキュリティ・取り扱い注意事項
-└── claude/
-    ├── consult_bundle_claude.py          # バンドル生成スクリプト（本体）
-    ├── consult.config.json               # 除外ルール等の設定（Git管理外）
-    ├── consult.config.example.json       # 設定ファイルのテンプレート
-    ├── 01_make_consult_bundle_spec.md    # スクリプト技術仕様
-    ├── 02_consult_template.md            # スレッド開始テンプレート
-    ├── 03_claude_session_guide.md        # セッション開始手順・モード選択ガイド
-    └── consult_case/                     # 生成物の出力先（Git管理外）
+├── claude/
+│   ├── consult_bundle_claude.py          # バンドル生成スクリプト（本体）
+│   ├── consult.config.example.json       # 設定ファイルのテンプレート
+│   ├── 01_make_consult_bundle_spec.md    # スクリプト技術仕様
+│   ├── 02_consult_template.md            # スレッド開始テンプレート
+│   ├── 03_claude_session_guide.md        # セッション開始手順・モード選択ガイド
+│   └── consult_case/                     # 生成物の出力先（Git管理外）
+└── local/                                # ローカル実設定（Git管理外）
+    └── claude/
+        ├── consult.config.json           # 除外ルール等の実設定（Git管理外）
+        └── consult.local.md              # プロジェクト固有設定（Git管理外）
 ```
 
 ---
@@ -67,6 +70,16 @@ your-repo/
 ```
 
 ### 2. 設定ファイルを作成する
+
+まず `local/claude/` ディレクトリを作成します。
+
+```bash
+# Mac / Linux
+mkdir -p ai-consult-tools/local/claude
+
+# Windows (PowerShell)
+New-Item -ItemType Directory -Force -Path ai-consult-tools\local\claude
+```
 
 `consult.config.example.json` をコピーして `consult.config.json` を作成し、あなたの環境に合わせて編集してください。
 
