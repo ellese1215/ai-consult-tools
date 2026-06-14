@@ -153,9 +153,10 @@ ChatGPTは diff bundle を受け取ったら以下を確認します：
 ## 5. セッション終了時の手順
 
 1. スレッド内の作業内容を整理する
-2. 修正をcommit → pushする
-3. 引き継ぎ文をChatGPTに作成させる（`02_consult_template_chatgpt.md` セクション11に記録）
-4. 次スレッドへの引き継ぎ文をコピーして保管する
+2. TODOドキュメントを更新する（`00_ai_consult_operation_rules.md` 12章に従う）
+3. 作業コードの修正とTODO更新をまとめてcommit → pushする
+4. 引き継ぎ文をChatGPTに作成させる（`02_consult_template_chatgpt.md` セクション11に記録）
+5. 次スレッドへの引き継ぎ文をコピーして保管する
 
 ---
 
