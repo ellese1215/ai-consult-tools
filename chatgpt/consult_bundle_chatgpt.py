@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
 consult_bundle_chatgpt.py
-- ChatGPT相談用スナップショット/差分バンドル生成（仕様 v1.6.2 準拠）
+- ChatGPT相談用スナップショット/差分バンドル生成（仕様 v1.7.0 準拠）
 - Python bundle generator for ChatGPT (ChatGPT版)
-- Updated: 2026-06-07
+- Updated: 2026-06-26
 
 Description:
   This script generates a consultation bundle for ChatGPT based on a local Git repository.
   It supports four modes: lightweight map, full repository snapshot, partial snapshot (include), and diff.
+  Include mode can resolve reusable include sets from consult.config.
   The output is organized into parts with size limits, and includes an INDEX.md, TREE.md,
-  MANIFEST.csv, and part files under a _bundle/ work directory, then compressed into a ZIP file.
+  MANIFEST.csv, PATH_INDEX.md, SKIPPED.txt, and part files under a _bundle/ work directory,
+  then compressed into a ZIP file.
   Output layout: <outRoot>/<BundleLabel>/<BundleLabel>.zip
 
 Usage examples:
@@ -172,6 +174,7 @@ class ConsultConfig:
         self.excluded_name_patterns: list[str] = []
         self.secret_name_patterns: list[str] = []
         self.allowed_tool_include_files: list[str] = []
+        self.include_sets: dict[str, list[str]] = {}
         self.config_path_full: str = ""
         self.applied: bool = False
 
@@ -199,6 +202,46 @@ def _normalize_ext_list(items: list[str]) -> list[str]:
         if not s.startswith("."):
             s = "." + s
         result.append(s)
+    return result
+
+
+def _normalize_include_sets(value) -> dict[str, list[str]]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("Invalid config value: includeSets must be an object.")
+    result: dict[str, list[str]] = {}
+    for raw_name, raw_paths in value.items():
+        name = str(raw_name).strip()
+        if not name:
+            raise ValueError("Invalid config value: includeSets contains an empty set name.")
+        paths = _normalize_path_list(_to_str_list(raw_paths, f"includeSets.{name}"))
+        if not paths:
+            raise ValueError(f"Invalid config value: includeSets.{name} must contain at least one path.")
+        result[name] = paths
+    return result
+
+
+def _flatten_cli_values(value) -> list[str]:
+    if not value:
+        return []
+    result: list[str] = []
+    for item in value:
+        if isinstance(item, list):
+            result.extend(str(v).strip() for v in item if str(v).strip())
+        elif str(item).strip():
+            result.append(str(item).strip())
+    return result
+
+
+def _unique_preserve_order(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in items:
+        key = item.lower()
+        if key not in seen:
+            seen.add(key)
+            result.append(item)
     return result
 
 
@@ -280,6 +323,7 @@ def apply_consult_config(repo_full: Path, config_path: str) -> ConsultConfig:
     cfg.excluded_name_patterns = _to_str_list(data["excludeNamePatterns"], "excludeNamePatterns")
     cfg.secret_name_patterns = _to_str_list(data["secretNamePatterns"], "secretNamePatterns")
     allowed = _normalize_path_list(_to_str_list(data["allowedToolIncludeFiles"], "allowedToolIncludeFiles"))
+    cfg.include_sets = _normalize_include_sets(data.get("includeSets"))
 
     cfg.allowed_tool_include_files = _unique_strings(allowed, [cfg.rule_file_rel])
     cfg.excluded_folders = _unique_strings(cfg.excluded_folders, [cfg.out_root_rel])
@@ -722,6 +766,12 @@ def write_index_md(
 
 {parts_lines}
 
+---
+
+## Path Index
+
+- PATH_INDEX.md を参照（include set / requested path / resolved path / missing / excluded の確認用）
+
 {extra_section}
 """
     index_path.write_text(content, encoding="utf-8")
@@ -766,6 +816,95 @@ def write_manifest_csv(manifest_path: Path, rows: list[dict]):
         ])
         lines.append(line)
     manifest_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_path_index_md(
+    path_index_path: Path,
+    *,
+    docset: str,
+    mode: str,
+    cfg: ConsultConfig,
+    include_set_names: list[str] | None,
+    requested_include_paths: list[str] | None,
+    resolution_records: list[dict] | None,
+    manifest_rows: list[dict],
+):
+    include_set_names = include_set_names or []
+    requested_include_paths = requested_include_paths or []
+    resolution_records = resolution_records or []
+
+    set_lines: list[str] = []
+    if include_set_names:
+        for name in include_set_names:
+            set_lines.append(f"### {name}")
+            paths = cfg.include_sets.get(name, [])
+            if not paths:
+                set_lines.append("- [ERROR] include set is not defined or empty")
+            else:
+                for item in paths:
+                    set_lines.append(f"- {item}")
+            set_lines.append("")
+    else:
+        set_lines.append("- (none)")
+
+    requested_lines = [f"- {p}" for p in requested_include_paths] or ["- (none)"]
+
+    record_lines: list[str] = []
+    if resolution_records:
+        for rec in resolution_records:
+            record_lines.append(f"- [{rec.get('status', '')}] {rec.get('source', '')}: {rec.get('requested', '')}")
+            reason = rec.get("reason") or ""
+            if reason:
+                record_lines.append(f"  - Reason: {reason}")
+            resolved = rec.get("resolved") or []
+            if resolved:
+                for rp in resolved[:50]:
+                    record_lines.append(f"  - Resolved: {rp}")
+                if len(resolved) > 50:
+                    record_lines.append(f"  - Resolved: ... ({len(resolved) - 50} more)")
+    else:
+        record_lines.append("- (no explicit include path resolution records)")
+
+    included_lines = [f"- {r.get('relative_path', '')}" for r in sorted(manifest_rows, key=lambda x: x.get("relative_path", ""))]
+    if not included_lines:
+        included_lines = ["- (none)"]
+
+    content = f"""# PATH_INDEX (DocSet={docset})
+
+PATH_INDEX.md は、bundle生成時点の実ファイルから自動生成される確認用索引です。
+手動更新ドキュメントではありません。
+
+---
+
+## Mode
+
+- Mode: {mode}
+
+---
+
+## Include Sets Requested
+
+{chr(10).join(set_lines).rstrip()}
+
+---
+
+## Include Paths Requested Directly
+
+{chr(10).join(requested_lines)}
+
+---
+
+## Path Resolution Results
+
+{chr(10).join(record_lines)}
+
+---
+
+## Included Paths
+
+{chr(10).join(included_lines)}
+"""
+    path_index_path.write_text(content, encoding="utf-8")
 
 
 def write_skipped_txt(skipped_path: Path, skipped: list[str], docset: str):
@@ -950,9 +1089,14 @@ def get_map_git_section(repo_full: Path) -> str:
 def format_command_line(args: argparse.Namespace, cfg: ConsultConfig, repo_root_full: Path) -> str:
     script = os.path.abspath(sys.argv[0])
     parts = [f'python "{script}"', f"--mode {args.mode}", f'--repo-root "{repo_root_full}"']
+
+    include_set_names = _flatten_cli_values(getattr(args, "include_set", []))
+    if args.mode == "include" and include_set_names:
+        quoted = " ".join(f'"{name}"' for name in include_set_names)
+        parts.append(f"--include-set {quoted}")
     if args.mode == "include" and args.include_paths:
-        for ip in args.include_paths:
-            parts.append(f'--include-paths "{ip}"')
+        quoted = " ".join(f'"{ip}"' for ip in args.include_paths)
+        parts.append(f"--include-paths {quoted}")
     if cfg.applied:
         parts.append(f'--config-path "{cfg.config_path_full}"')
     if args.allow_docset_folders:
@@ -982,25 +1126,73 @@ def format_command_line(args: argparse.Namespace, cfg: ConsultConfig, repo_root_
 # Include path resolver
 # ---------------------------------------------------------------------------
 
-def resolve_include_targets(
+def expand_include_sets(cfg: ConsultConfig, include_set_names: list[str]) -> list[dict]:
+    requests: list[dict] = []
+    for name in include_set_names:
+        if name not in cfg.include_sets:
+            known = ", ".join(sorted(cfg.include_sets)) or "(none)"
+            raise ValueError(f"IncludeSet not found: {name}. Available includeSets: {known}")
+        for path_value in cfg.include_sets[name]:
+            requests.append({"source": f"include-set:{name}", "path": path_value})
+    return requests
+
+
+def get_exclusion_reason(
     repo_full: Path,
-    include_paths: list[str],
+    file_full: Path,
     filters: Filters,
     allow_docset_folders: bool,
-) -> list[Path]:
-    if not include_paths:
-        raise ValueError("include_paths is required for mode=include")
+) -> str:
+    if not file_full.is_file():
+        return "not-file"
+    if not allow_docset_folders and contains_docset_folder(repo_full, file_full):
+        return "docset-folder"
+    allowed_tool = filters.is_allowed_tool_include_file(file_full)
+    if not allowed_tool and filters.is_excluded_by_folder(file_full):
+        return "excluded-folder"
+    if filters.is_excluded_by_extension(file_full):
+        return "excluded-extension"
+    if filters.is_excluded_by_secret_pattern(file_full):
+        return "secret-pattern"
+    if filters.is_excluded_by_name_pattern(file_full):
+        return "excluded-name-pattern"
+    return ""
+
+
+def _make_resolution_record(source: str, requested: str, status: str, reason: str = "", resolved: list[str] | None = None) -> dict:
+    return {
+        "source": source,
+        "requested": requested,
+        "status": status,
+        "reason": reason,
+        "resolved": resolved or [],
+    }
+
+
+def resolve_include_targets(
+    repo_full: Path,
+    include_requests: list[dict],
+    filters: Filters,
+    allow_docset_folders: bool,
+) -> tuple[list[Path], list[dict], list[str]]:
+    if not include_requests:
+        raise ValueError("include_paths or include_set is required for mode=include")
 
     targets: list[Path] = []
+    records: list[dict] = []
     skipped: list[str] = []
 
-    for raw in include_paths:
+    for req in include_requests:
+        raw = str(req.get("path", ""))
+        source = str(req.get("source", "include-paths"))
         spec = raw.strip()
         if not spec:
+            records.append(_make_resolution_record(source, raw, "empty", "empty include path"))
+            skipped.append(f"[empty] {source}: {raw}")
             continue
 
         if any(c in spec for c in ["*", "?", "["]):
-            raise ValueError(f"Wildcards are not supported in v1.4.5 include specs: {spec}")
+            raise ValueError(f"Wildcards are not supported in include specs: {spec}")
 
         spec_is_no_sep = not os.path.isabs(spec) and "/" not in spec and "\\" not in spec
         candidate_path = Path(spec) if os.path.isabs(spec) else repo_full / spec
@@ -1020,87 +1212,111 @@ def resolve_include_targets(
                 has_any = any(
                     True for f in d.rglob("*")
                     if f.is_file()
-                    and (allow_docset_folders or not contains_docset_folder(repo_full, f))
-                    and filters.is_includable(f)
+                    and not get_exclusion_reason(repo_full, f, filters, allow_docset_folders)
                 )
                 if has_any:
                     dir_filtered.append(d)
 
             if len(dir_filtered) > 1:
                 rels = sorted(to_relative(repo_full, d) for d in dir_filtered)
+                records.append(_make_resolution_record(source, spec, "ambiguous", "multiple folder matches", rels))
                 raise ValueError(
                     f"IncludeFolderName is ambiguous (multiple matches). Use explicit path.\n"
                     f"Name: {spec}\nMatches:\n - " + "\n - ".join(rels)
                 )
             if len(dir_filtered) == 1:
+                resolved: list[str] = []
                 for f in dir_filtered[0].rglob("*"):
                     if not f.is_file():
                         continue
-                    if not allow_docset_folders and contains_docset_folder(repo_full, f):
+                    reason = get_exclusion_reason(repo_full, f, filters, allow_docset_folders)
+                    if reason:
                         continue
-                    if filters.is_includable(f):
-                        targets.append(f)
+                    targets.append(f)
+                    resolved.append(to_relative(repo_full, f))
+                records.append(_make_resolution_record(source, spec, "ok", "folder-name match", sorted(resolved)))
                 continue
 
             # Search by file name
-            file_hits = [
+            all_file_hits = [
                 f for f in repo_full.rglob(spec)
                 if f.is_file()
                 and (allow_docset_folders or not contains_docset_folder(repo_full, f))
-                and filters.is_includable(f)
             ]
+            file_hits = [f for f in all_file_hits if not get_exclusion_reason(repo_full, f, filters, allow_docset_folders)]
             if not file_hits:
+                reason = "not-found"
+                if all_file_hits:
+                    reason = "all matches excluded"
                 print(f"Warning: IncludeFileName not found or excluded (skipped): {spec}", file=sys.stderr)
-                skipped.append(spec)
+                records.append(_make_resolution_record(source, spec, "missing" if reason == "not-found" else "excluded", reason))
+                skipped.append(f"[{'missing' if reason == 'not-found' else 'excluded'}] {source}: {spec} ({reason})")
                 continue
             if len(file_hits) > 1:
                 rels = sorted(to_relative(repo_full, f) for f in file_hits)
+                records.append(_make_resolution_record(source, spec, "ambiguous", "multiple file matches", rels))
                 raise ValueError(
                     f"IncludeFileName is ambiguous (multiple matches). Use explicit path.\n"
                     f"Name: {spec}\nMatches:\n - " + "\n - ".join(rels)
                 )
             targets.append(file_hits[0])
+            records.append(_make_resolution_record(source, spec, "ok", "file-name match", [to_relative(repo_full, file_hits[0])]))
             continue
 
         # Treat as explicit path
         candidate = Path(spec) if os.path.isabs(spec) else repo_full / spec
         if not candidate.exists():
             print(f"Warning: IncludePath not found (skipped): {spec}", file=sys.stderr)
-            skipped.append(spec)
+            records.append(_make_resolution_record(source, spec, "missing", "path does not exist"))
+            skipped.append(f"[missing] {source}: {spec}")
             continue
 
         full = resolve_full(candidate)
         if full.is_file():
-            if not allow_docset_folders and contains_docset_folder(repo_full, full):
-                print(f"Warning: IncludePath skipped (DocSet folder): {spec}", file=sys.stderr)
-                skipped.append(spec)
-                continue
-            if not filters.is_includable(full):
+            reason = get_exclusion_reason(repo_full, full, filters, allow_docset_folders)
+            if reason:
                 print(f"Warning: IncludePath is excluded by rules (skipped): {spec}", file=sys.stderr)
-                skipped.append(spec)
+                records.append(_make_resolution_record(source, spec, "excluded", reason))
+                skipped.append(f"[excluded] {source}: {spec} ({reason})")
                 continue
             targets.append(full)
+            records.append(_make_resolution_record(source, spec, "ok", "explicit-file", [to_relative(repo_full, full)]))
         elif full.is_dir():
+            resolved: list[str] = []
+            excluded_count = 0
             for f in full.rglob("*"):
                 if not f.is_file():
                     continue
-                if not allow_docset_folders and contains_docset_folder(repo_full, f):
+                reason = get_exclusion_reason(repo_full, f, filters, allow_docset_folders)
+                if reason:
+                    excluded_count += 1
                     continue
                 targets.append(f)
+                resolved.append(to_relative(repo_full, f))
+            if resolved:
+                reason = "explicit-directory"
+                if excluded_count:
+                    reason += f"; excluded_files={excluded_count}"
+                records.append(_make_resolution_record(source, spec, "ok", reason, sorted(resolved)))
+            else:
+                records.append(_make_resolution_record(source, spec, "excluded", "directory has no includable files"))
+                skipped.append(f"[excluded] {source}: {spec} (directory has no includable files)")
 
     if not targets:
+        requested = ", ".join(req.get("path", "") for req in include_requests)
         raise ValueError(
-            f"No valid IncludePaths remained after filtering. Requested: {', '.join(include_paths)}"
+            f"No valid IncludePaths remained after filtering. Requested: {requested}"
         )
 
     # Deduplicate
-    seen: set[Path] = set()
+    seen: set[str] = set()
     result: list[Path] = []
-    for p in sorted(set(targets)):
-        if p not in seen:
-            seen.add(p)
+    for p in sorted(targets):
+        key = str(resolve_full(p)).lower()
+        if key not in seen:
+            seen.add(key)
             result.append(p)
-    return result
+    return result, records, skipped
 
 # ---------------------------------------------------------------------------
 # Map processing
@@ -1178,6 +1394,7 @@ def invoke_map(
     tree_path = work_dir / "TREE.md"
     manifest_path = work_dir / "MANIFEST.csv"
     skipped_path = work_dir / "SKIPPED.txt"
+    path_index_path = work_dir / "PATH_INDEX.md"
 
     map_extra = (
         "---\n\n## Map Mode Notice\n\n"
@@ -1194,6 +1411,10 @@ def invoke_map(
     )
     write_tree_md(tree_path, tree_lines, docset, "map")
     write_manifest_csv(manifest_path, manifest_rows)
+    write_path_index_md(
+        path_index_path, docset=docset, mode="map", cfg=index_kwargs["cfg"],
+        include_set_names=[], requested_include_paths=[], resolution_records=[], manifest_rows=manifest_rows,
+    )
     write_skipped_txt(skipped_path, skipped, docset)
 
 # ---------------------------------------------------------------------------
@@ -1214,6 +1435,11 @@ def invoke_snapshot(
     max_chars_per_part: int,
     max_chars_per_file: int,
     index_kwargs: dict,
+    *,
+    include_set_names: list[str] | None = None,
+    requested_include_paths: list[str] | None = None,
+    resolution_records: list[dict] | None = None,
+    pre_skipped: list[str] | None = None,
 ):
     included = []
     for f in candidate_files:
@@ -1224,7 +1450,7 @@ def invoke_snapshot(
 
     included_sorted = sorted(included, key=lambda x: (x["group"], x["rel"]))
     manifest_rows: list[dict] = []
-    skipped: list[str] = []
+    skipped: list[str] = list(pre_skipped or [])
     included_bytes_total = 0
 
     def build_fn(it: dict) -> dict:
@@ -1273,10 +1499,18 @@ def invoke_snapshot(
     tree_path = work_dir / "TREE.md"
     manifest_path = work_dir / "MANIFEST.csv"
     skipped_path = work_dir / "SKIPPED.txt"
+    path_index_path = work_dir / "PATH_INDEX.md"
 
     write_index_md(index_path, stats, part_files_out, "", **index_kwargs)
     write_tree_md(tree_path, tree_lines, docset, mode)
     write_manifest_csv(manifest_path, manifest_rows)
+    write_path_index_md(
+        path_index_path, docset=docset, mode=mode, cfg=index_kwargs["cfg"],
+        include_set_names=include_set_names or [],
+        requested_include_paths=requested_include_paths or [],
+        resolution_records=resolution_records or [],
+        manifest_rows=manifest_rows,
+    )
     write_skipped_txt(skipped_path, skipped, docset)
 
 # ---------------------------------------------------------------------------
@@ -1604,10 +1838,15 @@ def invoke_diff(
     tree_path = work_dir / "TREE.md"
     manifest_path = work_dir / "MANIFEST.csv"
     skipped_path = work_dir / "SKIPPED.txt"
+    path_index_path = work_dir / "PATH_INDEX.md"
 
     write_index_md(index_path, stats, part_files_out, diff_extra, **index_kwargs)
     write_tree_md(tree_path, tree_lines, docset, "diff")
     write_manifest_csv(manifest_path, manifest_rows)
+    write_path_index_md(
+        path_index_path, docset=docset, mode="diff", cfg=index_kwargs["cfg"],
+        include_set_names=[], requested_include_paths=[], resolution_records=[], manifest_rows=manifest_rows,
+    )
     write_skipped_txt(skipped_path, skipped, docset)
 
     return True
@@ -1625,6 +1864,7 @@ def main():
     parser.add_argument("--repo-root", required=True, help="Git repository root path")
     parser.add_argument("--case-name", default="", help="Optional case name suffix")
     parser.add_argument("--config-path", default="", help="Path to consult.config.json")
+    parser.add_argument("--include-set", nargs="+", action="append", default=[], help="Named include set(s) from consult config (mode=include)")
     parser.add_argument("--include-paths", nargs="+", default=[], help="Paths to include (mode=include)")
     parser.add_argument("--allow-docset-folders", action="store_true")
     parser.add_argument("--keep-bundle-dir", action="store_true", help="Keep _bundle work directory after ZIP")
@@ -1722,14 +1962,21 @@ def main():
             print(f"OK: repo snapshot generated at {work_dir}")
 
         elif args.mode == "include":
-            targets = resolve_include_targets(
-                repo_root_full, args.include_paths, filters, args.allow_docset_folders
+            include_set_names = _unique_preserve_order(_flatten_cli_values(args.include_set))
+            include_requests = expand_include_sets(cfg, include_set_names)
+            include_requests.extend({"source": "include-paths", "path": p} for p in args.include_paths)
+            targets, resolution_records, pre_skipped = resolve_include_targets(
+                repo_root_full, include_requests, filters, args.allow_docset_folders
             )
             invoke_snapshot(
                 "include", repo_root_full, targets, filters,
                 work_dir, parts_dir, bundle_label, docset, generated_at,
                 args.max_bytes_per_part, args.max_chars_per_part, args.max_chars_per_file,
                 index_kwargs,
+                include_set_names=include_set_names,
+                requested_include_paths=args.include_paths,
+                resolution_records=resolution_records,
+                pre_skipped=pre_skipped,
             )
             print(f"OK: include snapshot generated at {work_dir}")
 
