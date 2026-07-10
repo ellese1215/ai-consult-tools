@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Iterable
 
 from ai_consult.bundle import (
+    BundleCommand,
     BundleItem,
+    BundleModel,
     BundleOrigin,
     ContentKind,
     GitChange,
@@ -98,6 +100,30 @@ class GitReviewSnapshot:
             + self.unstaged_items
             + self.untracked_items
         )
+
+
+def collect_review_bundle(
+    repo_root: str | Path,
+    config: ConsultConfig,
+    profile: ProjectProfile,
+    *,
+    target_paths: Iterable[str] = (),
+) -> BundleModel:
+    collector = GitDiffCollector(
+        repo_root,
+        config,
+        profile,
+        target_paths=target_paths,
+    )
+    snapshot = collector.collect()
+
+    return BundleModel(
+        command=BundleCommand.REVIEW,
+        profile_name=collector.profile.name,
+        target_paths=collector.target_paths,
+        items=snapshot.items,
+        skipped_items=snapshot.skipped_items,
+    )
 
 
 @dataclass(frozen=True)

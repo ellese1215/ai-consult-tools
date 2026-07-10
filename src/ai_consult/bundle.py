@@ -371,6 +371,7 @@ class ManifestRow:
 class BundleModel:
     command: BundleCommand
     profile_name: str
+    target_paths: tuple[str, ...] = ()
     items: tuple[BundleItem, ...] = ()
     path_resolutions: tuple[PathResolution, ...] = ()
     skipped_items: tuple[SkippedItem, ...] = ()
@@ -386,10 +387,17 @@ class BundleModel:
             "profile_name",
         )
 
+        target_paths = _normalize_target_paths(self.target_paths)
         items = tuple(self.items)
         path_resolutions = tuple(self.path_resolutions)
         skipped_items = tuple(self.skipped_items)
 
+        if self.command is not BundleCommand.REVIEW and target_paths:
+            raise BundleModelError(
+                "target_paths are only valid for review bundles"
+            )
+
+        object.__setattr__(self, "target_paths", target_paths)
         object.__setattr__(self, "items", items)
         object.__setattr__(
             self,
@@ -464,6 +472,40 @@ class BundleModel:
             ManifestRow.from_item(item)
             for item in ordered_items
         )
+
+
+def _normalize_target_paths(values: tuple[str, ...]) -> tuple[str, ...]:
+    if isinstance(values, (str, bytes)):
+        raise BundleModelError(
+            "target_paths must be an iterable of strings"
+        )
+
+    try:
+        candidates = tuple(values)
+    except TypeError as exc:
+        raise BundleModelError(
+            "target_paths must be an iterable of strings"
+        ) from exc
+
+    for index, value in enumerate(candidates):
+        _validate_relative_path(value, f"target_paths[{index}]")
+
+    ordered = tuple(
+        sorted(candidates, key=lambda value: (value.casefold(), value))
+    )
+    seen: set[str] = set()
+
+    for value in ordered:
+        folded = value.casefold()
+
+        if folded in seen:
+            raise BundleModelError(
+                f"target_paths contains duplicate path: {value}"
+            )
+
+        seen.add(folded)
+
+    return ordered
 
 
 def _bundle_item_sort_key(

@@ -428,6 +428,77 @@ class BundleModelTest(unittest.TestCase):
         self.assertIn(",staged,modified,", lines[1])
         self.assertIn(",unstaged,modified,", lines[2])
 
+    def test_review_target_paths_are_sorted_and_frozen(self) -> None:
+        bundle = BundleModel(
+            command=BundleCommand.REVIEW,
+            profile_name="ai_consult_tools",
+            target_paths=[
+                "ai-consult-tools/tests",
+                "ai-consult-tools/src",
+            ],
+        )
+
+        self.assertEqual(
+            bundle.target_paths,
+            (
+                "ai-consult-tools/src",
+                "ai-consult-tools/tests",
+            ),
+        )
+        self.assertIsInstance(bundle.target_paths, tuple)
+
+    def test_rejects_invalid_or_duplicate_target_paths(self) -> None:
+        invalid_values = (
+            "",
+            "ai-consult-tools\\src",
+            "/ai-consult-tools/src",
+            "C:/xampp/htdocs",
+            "ai-consult-tools/src/",
+            "ai-consult-tools/../src",
+        )
+
+        for value in invalid_values:
+            with self.subTest(value=value):
+                with self.assertRaises(BundleModelError):
+                    BundleModel(
+                        command=BundleCommand.REVIEW,
+                        profile_name="ai_consult_tools",
+                        target_paths=(value,),
+                    )
+
+        with self.assertRaisesRegex(
+            BundleModelError,
+            "duplicate path",
+        ):
+            BundleModel(
+                command=BundleCommand.REVIEW,
+                profile_name="ai_consult_tools",
+                target_paths=(
+                    "ai-consult-tools/src",
+                    "AI-CONSULT-TOOLS/SRC",
+                ),
+            )
+
+        with self.assertRaises(BundleModelError):
+            BundleModel(
+                command=BundleCommand.REVIEW,
+                profile_name="ai_consult_tools",
+                target_paths="ai-consult-tools/src",  # type: ignore[arg-type]
+            )
+
+    def test_non_review_bundle_rejects_target_paths(self) -> None:
+        for command in (BundleCommand.START, BundleCommand.INSPECT):
+            with self.subTest(command=command):
+                with self.assertRaisesRegex(
+                    BundleModelError,
+                    "only valid for review",
+                ):
+                    BundleModel(
+                        command=command,
+                        profile_name="ai_consult_tools",
+                        target_paths=("ai-consult-tools/src",),
+                    )
+
     def test_rejects_invalid_profile_name_or_member_types(self) -> None:
         with self.assertRaises(BundleModelError):
             BundleModel(

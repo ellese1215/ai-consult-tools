@@ -14,7 +14,7 @@ SRC_ROOT = TOOL_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from ai_consult.bundle import BundleOrigin, GitChange
+from ai_consult.bundle import BundleCommand, BundleOrigin, GitChange
 from ai_consult.collection import CollectionStatus
 from ai_consult.config import (
     ConsultConfig,
@@ -25,6 +25,7 @@ from ai_consult.git_diff import (
     GitDiffCollector,
     GitDiffError,
     GitReviewSnapshot,
+    collect_review_bundle,
 )
 
 
@@ -159,6 +160,77 @@ class GitDiffCollectorTest(unittest.TestCase):
                 unstaged.source_sha256,
             )
 
+
+    def test_collect_review_bundle_preserves_scope_and_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = GitRepository(Path(temp_dir))
+            repo.write_text("app/file.txt", "base\n")
+            repo.commit_all("base")
+
+            repo.write_text("app/file.txt", "staged\n")
+            repo.git("add", "app/file.txt")
+            repo.write_text("app/file.txt", "worktree\n")
+            repo.write_text("app/new.txt", "new file\n")
+            repo.write_text("app/private/secret.txt", "secret\n")
+            before = repo.status_bytes()
+
+            bundle = collect_review_bundle(
+                repo.root,
+                make_config(exclude_paths=("app/private/",)),
+                make_profile("app"),
+                target_paths=["app"],
+            )
+
+            self.assertEqual(repo.status_bytes(), before)
+            self.assertEqual(bundle.command, BundleCommand.REVIEW)
+            self.assertEqual(bundle.profile_name, "test_profile")
+            self.assertEqual(bundle.target_paths, ("app",))
+            self.assertEqual(
+                tuple(item.origin for item in bundle.items),
+                (
+                    BundleOrigin.STAGED,
+                    BundleOrigin.UNSTAGED,
+                    BundleOrigin.UNTRACKED,
+                ),
+            )
+            self.assertEqual(bundle.included_count, 3)
+            self.assertEqual(bundle.skipped_count, 1)
+            self.assertEqual(
+                bundle.skipped_items[0].relative_path,
+                "app/private/secret.txt",
+            )
+            self.assertEqual(len(bundle.manifest_rows), 3)
+
+    def test_collect_review_bundle_allows_empty_full_profile_review(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = GitRepository(Path(temp_dir))
+
+            bundle = collect_review_bundle(
+                repo.root,
+                make_config(),
+                make_profile("app"),
+            )
+
+            self.assertEqual(bundle.command, BundleCommand.REVIEW)
+            self.assertEqual(bundle.profile_name, "test_profile")
+            self.assertEqual(bundle.target_paths, ())
+            self.assertEqual(bundle.items, ())
+            self.assertEqual(bundle.skipped_items, ())
+
+    def test_collect_review_bundle_rejects_external_target_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = GitRepository(Path(temp_dir))
+
+            with self.assertRaisesRegex(
+                GitDiffError,
+                "outside the project profile",
+            ):
+                collect_review_bundle(
+                    repo.root,
+                    make_config(),
+                    make_profile("app"),
+                    target_paths=("other",),
+                )
 
     def test_collects_initial_staged_file_without_head_commit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
