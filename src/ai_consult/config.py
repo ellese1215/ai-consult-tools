@@ -7,6 +7,7 @@ from typing import Any
 
 
 SUPPORTED_SCHEMA_VERSION = 1
+SUPPORTED_PROJECT_PROFILES_SCHEMA_VERSION = 1
 DEFAULT_MAX_TEXT_BYTES = 2_000_000
 DEFAULT_INVENTORY_EXCLUDE_PATHS = (
     ".git",
@@ -73,6 +74,51 @@ class ConsultConfig:
     inventory: InventoryConfig = field(default_factory=InventoryConfig)
 
 
+@dataclass(frozen=True)
+class ProjectProfile:
+    name: str
+    scope_roots: tuple[str, ...]
+
+    def contains(self, relative_path: str) -> bool:
+        _validate_repo_relative_path(
+            relative_path,
+            "relativePath",
+            allow_trailing_slash=False,
+        )
+        folded_path = relative_path.casefold()
+
+        return any(
+            folded_path == root.casefold()
+            or folded_path.startswith(root.casefold() + "/")
+            for root in self.scope_roots
+        )
+
+
+@dataclass(frozen=True)
+class ProjectProfilesConfig:
+    schema_version: int
+    profiles: tuple[ProjectProfile, ...]
+
+    def get(self, name: str) -> ProjectProfile:
+        folded_name = name.casefold()
+
+        for profile in self.profiles:
+            if profile.name.casefold() == folded_name:
+                return profile
+
+        raise ConfigError(f"unknown project profile: {name}")
+
+    def matching_profile_names(
+        self,
+        relative_path: str,
+    ) -> tuple[str, ...]:
+        return tuple(
+            profile.name
+            for profile in self.profiles
+            if profile.contains(relative_path)
+        )
+
+
 def _reject_unknown_keys(
     value: dict[str, Any],
     allowed: set[str],
@@ -125,6 +171,83 @@ def _merge_unique_strings(
         result.append(item)
 
     return tuple(result)
+
+
+def _validate_repo_relative_path(
+    value: str,
+    context: str,
+    *,
+    allow_trailing_slash: bool,
+) -> None:
+    if not value:
+        raise ConfigError(f"{context} must be a non-empty string")
+
+    if value != value.strip():
+        raise ConfigError(
+            f"{context} must not contain leading or trailing whitespace"
+        )
+
+    if "\\" in value:
+        raise ConfigError(f"{context} must use / separators: {value}")
+
+    if value.startswith("/") or (
+        len(value) >= 3 and value[1:3] == ":/"
+    ):
+        raise ConfigError(f"{context} must be RepoRoot-relative: {value}")
+
+    if value.endswith("/") and not allow_trailing_slash:
+        raise ConfigError(f"{context} must not end with /: {value}")
+
+    logical_value = value[:-1] if value.endswith("/") else value
+    parts = logical_value.split("/")
+
+    if any(part in {"", ".", ".."} for part in parts):
+        raise ConfigError(f"{context} is not a canonical path: {value}")
+
+
+def _parse_project_profile(
+    name: str,
+    value: Any,
+) -> ProjectProfile:
+    context = f"profiles.{name}"
+
+    if not isinstance(value, dict):
+        raise ConfigError(f"{context} must be an object")
+
+    _reject_unknown_keys(value, {"scopeRoots"}, context)
+    raw_scope_roots = value.get("scopeRoots")
+
+    if not isinstance(raw_scope_roots, list):
+        raise ConfigError(f"{context}.scopeRoots must be an array")
+
+    scope_roots: list[str] = []
+    seen: set[str] = set()
+
+    for index, item in enumerate(raw_scope_roots):
+        item_context = f"{context}.scopeRoots[{index}]"
+
+        if not isinstance(item, str):
+            raise ConfigError(f"{item_context} must be a string")
+
+        _validate_repo_relative_path(
+            item,
+            item_context,
+            allow_trailing_slash=False,
+        )
+        folded = item.casefold()
+
+        if folded in seen:
+            raise ConfigError(
+                f"{context}.scopeRoots contains a duplicate path: {item}"
+            )
+
+        seen.add(folded)
+        scope_roots.append(item)
+
+    return ProjectProfile(
+        name=name,
+        scope_roots=tuple(scope_roots),
+    )
 
 
 def parse_config(payload: Any) -> ConsultConfig:
@@ -212,22 +335,93 @@ def parse_config(payload: Any) -> ConsultConfig:
     )
 
 
-def load_config(path: str | Path) -> ConsultConfig:
-    config_path = Path(path)
+def parse_project_profiles(payload: Any) -> ProjectProfilesConfig:
+    if not isinstance(payload, dict):
+        raise ConfigError("project profiles root must be an object")
 
+    _reject_unknown_keys(
+        payload,
+        {"schemaVersion", "profiles"},
+        "project profiles",
+    )
+    schema_version = payload.get("schemaVersion")
+
+    if type(schema_version) is not int:
+        raise ConfigError(
+            "project profiles schemaVersion must be an integer"
+        )
+
+    if schema_version != SUPPORTED_PROJECT_PROFILES_SCHEMA_VERSION:
+        raise ConfigError(
+            "unsupported project profiles schemaVersion: "
+            f"{schema_version}; expected "
+            f"{SUPPORTED_PROJECT_PROFILES_SCHEMA_VERSION}"
+        )
+
+    profiles_value = payload.get("profiles")
+
+    if not isinstance(profiles_value, dict):
+        raise ConfigError("project profiles.profiles must be an object")
+
+    if not all(isinstance(name, str) for name in profiles_value):
+        raise ConfigError("project profile names must be strings")
+
+    profiles: list[ProjectProfile] = []
+    seen_names: set[str] = set()
+
+    for name in sorted(
+        profiles_value,
+        key=lambda item: (item.casefold(), item),
+    ):
+        if not name or name != name.strip():
+            raise ConfigError(
+                "project profile names must be non-empty and trimmed"
+            )
+
+        folded_name = name.casefold()
+
+        if folded_name in seen_names:
+            raise ConfigError(
+                f"duplicate project profile name: {name}"
+            )
+
+        seen_names.add(folded_name)
+        profiles.append(
+            _parse_project_profile(name, profiles_value[name])
+        )
+
+    return ProjectProfilesConfig(
+        schema_version=schema_version,
+        profiles=tuple(profiles),
+    )
+
+
+def _load_json(path: Path, description: str) -> Any:
     try:
-        text = config_path.read_text(encoding="utf-8-sig")
+        text = path.read_text(encoding="utf-8-sig")
     except OSError as exc:
         raise ConfigError(
-            f"cannot read configuration: {config_path}: {exc}"
+            f"cannot read {description}: {path}: {exc}"
         ) from exc
 
     try:
-        payload = json.loads(text)
+        return json.loads(text)
     except json.JSONDecodeError as exc:
         raise ConfigError(
-            f"invalid JSON in configuration: "
-            f"{config_path}:{exc.lineno}:{exc.colno}: {exc.msg}"
+            f"invalid JSON in {description}: "
+            f"{path}:{exc.lineno}:{exc.colno}: {exc.msg}"
         ) from exc
 
-    return parse_config(payload)
+
+def load_config(path: str | Path) -> ConsultConfig:
+    config_path = Path(path)
+    return parse_config(_load_json(config_path, "configuration"))
+
+
+def load_project_profiles(
+    path: str | Path,
+) -> ProjectProfilesConfig:
+    profiles_path = Path(path)
+    return parse_project_profiles(
+        _load_json(profiles_path, "project profiles")
+    )

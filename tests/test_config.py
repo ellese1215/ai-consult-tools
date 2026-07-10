@@ -17,7 +17,9 @@ from ai_consult.config import (
     DEFAULT_INVENTORY_EXCLUDE_PATHS,
     ConfigError,
     load_config,
+    load_project_profiles,
     parse_config,
+    parse_project_profiles,
 )
 
 
@@ -140,6 +142,132 @@ class ConfigTest(unittest.TestCase):
             config = load_config(path)
 
         self.assertEqual(config.schema_version, 1)
+
+
+class ProjectProfilesConfigTest(unittest.TestCase):
+    def test_parse_profiles_and_match_scope_roots(self) -> None:
+        config = parse_project_profiles(
+            {
+                "schemaVersion": 1,
+                "profiles": {
+                    "tax_ledger": {
+                        "scopeRoots": ["apps/tax-ledger"],
+                    },
+                    "ai_consult_tools": {
+                        "scopeRoots": ["ai-consult-tools"],
+                    },
+                },
+            }
+        )
+
+        self.assertEqual(
+            tuple(profile.name for profile in config.profiles),
+            ("ai_consult_tools", "tax_ledger"),
+        )
+        self.assertTrue(
+            config.get("TAX_LEDGER").contains(
+                "apps/tax-ledger/docs/00_project_status.md"
+            )
+        )
+        self.assertFalse(
+            config.get("tax_ledger").contains("apps/other/file.txt")
+        )
+        self.assertEqual(
+            config.matching_profile_names(
+                "ai-consult-tools/src/ai_consult/config.py"
+            ),
+            ("ai_consult_tools",),
+        )
+
+    def test_rejects_invalid_project_profile_schema(self) -> None:
+        invalid_payloads = (
+            {"schemaVersion": 99, "profiles": {}},
+            {
+                "schemaVersion": 1,
+                "profiles": {},
+                "unexpected": True,
+            },
+            {
+                "schemaVersion": 1,
+                "profiles": {
+                    "sample": {
+                        "scopeRoots": ["apps/sample"],
+                        "unexpected": True,
+                    }
+                },
+            },
+            {
+                "schemaVersion": 1,
+                "profiles": {
+                    "sample": {"scopeRoots": "apps/sample"}
+                },
+            },
+        )
+
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload):
+                with self.assertRaises(ConfigError):
+                    parse_project_profiles(payload)
+
+    def test_rejects_invalid_or_duplicate_scope_roots(self) -> None:
+        invalid_roots = (
+            "",
+            " apps/sample",
+            "apps/sample ",
+            "/apps/sample",
+            "C:/apps/sample",
+            "apps\\sample",
+            "apps/sample/",
+            ".",
+            "..",
+            "apps/../sample",
+            "apps//sample",
+        )
+
+        for root in invalid_roots:
+            with self.subTest(root=root):
+                with self.assertRaises(ConfigError):
+                    parse_project_profiles(
+                        {
+                            "schemaVersion": 1,
+                            "profiles": {
+                                "sample": {"scopeRoots": [root]}
+                            },
+                        }
+                    )
+
+        with self.assertRaises(ConfigError):
+            parse_project_profiles(
+                {
+                    "schemaVersion": 1,
+                    "profiles": {
+                        "sample": {
+                            "scopeRoots": [
+                                "apps/sample",
+                                "APPS/SAMPLE",
+                            ]
+                        }
+                    },
+                }
+            )
+
+    def test_loads_project_profiles_example(self) -> None:
+        path = TOOL_ROOT / "config" / "project_profiles.example.json"
+        config = load_project_profiles(path)
+
+        self.assertEqual(config.schema_version, 1)
+        self.assertEqual(
+            tuple(profile.name for profile in config.profiles),
+            (
+                "ai_consult_tools",
+                "pavilion_ellese",
+                "tax_ledger",
+            ),
+        )
+        self.assertIn(
+            "docs/projectFiles/エリーゼの館",
+            config.get("pavilion_ellese").scope_roots,
+        )
 
 
 if __name__ == "__main__":

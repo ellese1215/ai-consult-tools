@@ -51,9 +51,13 @@ class StructureCliTest(unittest.TestCase):
 
         self.assertEqual(sync_code, 0)
         self.assertIn("structure sync: updated", sync_output)
+        self.assertIn("folder tree: updated", sync_output)
+        self.assertIn("structure index: updated", sync_output)
         self.assertEqual(sync_error, "")
         self.assertEqual(check_code, 0)
         self.assertIn("structure check: current", check_output)
+        self.assertIn("folder tree: current", check_output)
+        self.assertIn("structure index: current", check_output)
         self.assertEqual(check_error, "")
 
     def test_check_returns_stale_without_modifying_folder_tree(self) -> None:
@@ -144,6 +148,104 @@ class StructureCliTest(unittest.TestCase):
         self.assertEqual(exit_code, EXIT_ERROR)
         self.assertIn("ERROR:", error)
         self.assertIn("outside RepoRoot", error)
+
+
+    def test_check_reports_missing_index_without_modifying_folder_tree(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "one.txt").write_text("one", encoding="utf-8")
+            self.run_cli(
+                "structure",
+                "sync",
+                "--repo-root",
+                str(repo),
+            )
+            tree_path = repo / "folder_tree.txt"
+            index_path = (
+                repo
+                / "ai-consult-tools"
+                / "local"
+                / "cache"
+                / "repo_structure_index.json"
+            )
+            previous_tree = tree_path.read_bytes()
+            index_path.unlink()
+
+            exit_code, output, error = self.run_cli(
+                "structure",
+                "check",
+                "--repo-root",
+                str(repo),
+            )
+            after_tree = tree_path.read_bytes()
+            index_exists = index_path.exists()
+
+        self.assertEqual(exit_code, EXIT_STALE)
+        self.assertIn("folder tree: current", output)
+        self.assertIn("structure index: stale", output)
+        self.assertEqual(error, "")
+        self.assertEqual(after_tree, previous_tree)
+        self.assertFalse(index_exists)
+
+    def test_sync_repairs_only_corrupt_structure_index(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "one.txt").write_text("one", encoding="utf-8")
+            self.run_cli(
+                "structure",
+                "sync",
+                "--repo-root",
+                str(repo),
+            )
+            tree_path = repo / "folder_tree.txt"
+            index_path = (
+                repo
+                / "ai-consult-tools"
+                / "local"
+                / "cache"
+                / "repo_structure_index.json"
+            )
+            previous_tree = tree_path.read_bytes()
+            index_path.write_text("not json\n", encoding="utf-8")
+
+            exit_code, output, error = self.run_cli(
+                "structure",
+                "sync",
+                "--repo-root",
+                str(repo),
+            )
+            after_tree = tree_path.read_bytes()
+            repaired_index = index_path.read_text(encoding="utf-8")
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("structure sync: updated", output)
+        self.assertIn("folder tree: current", output)
+        self.assertIn("structure index: updated", output)
+        self.assertIn("structure index comparison unavailable", output)
+        self.assertEqual(error, "")
+        self.assertEqual(after_tree, previous_tree)
+        self.assertTrue(repaired_index.endswith("\n"))
+
+    def test_check_does_not_create_missing_index_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "one.txt").write_text("one", encoding="utf-8")
+            cache_path = repo / "ai-consult-tools" / "local" / "cache"
+
+            exit_code, output, error = self.run_cli(
+                "structure",
+                "check",
+                "--repo-root",
+                str(repo),
+            )
+            cache_exists = cache_path.exists()
+
+        self.assertEqual(exit_code, EXIT_STALE)
+        self.assertIn("structure index: stale", output)
+        self.assertEqual(error, "")
+        self.assertFalse(cache_exists)
 
 
 if __name__ == "__main__":

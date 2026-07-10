@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -19,14 +20,21 @@ from ai_consult.config import ConsultConfig, FilterConfig, InventoryConfig
 from ai_consult.filters import PathFilter
 from ai_consult.inventory import (
     FolderTreeFormatError,
+    InventoryEntryType,
     InventoryError,
     InventoryLinkType,
     InventoryScanner,
+    StructureIndexFormatError,
     build_structure_diff,
     compare_folder_tree,
+    compare_structure_index,
     parse_folder_tree,
+    parse_structure_index,
+    prepare_structure_index_parent,
     render_folder_tree,
+    render_structure_index,
     sync_folder_tree,
+    sync_structure_index,
 )
 
 
@@ -423,6 +431,191 @@ class FolderTreeManagementTest(unittest.TestCase):
         self.assertTrue(result.updated)
         self.assertIsNotNone(result.comparison.format_error)
         self.assertEqual(written, b"visible.txt\n")
+
+
+class StructureIndexManagementTest(unittest.TestCase):
+    def test_render_structure_index_uses_minimal_deterministic_schema(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "Archive.ZIP").write_bytes(b"binary")
+            (repo / "README").write_text("readme", encoding="utf-8")
+            (repo / "docs").mkdir()
+            (repo / "docs" / "Guide.MD").write_text(
+                "guide",
+                encoding="utf-8",
+            )
+            snapshot = InventoryScanner(repo, PathFilter()).scan()
+            rendered = render_structure_index(snapshot)
+            payload = json.loads(rendered)
+
+        self.assertEqual(tuple(payload), ("schemaVersion", "entries"))
+        self.assertEqual(payload["schemaVersion"], 1)
+        self.assertFalse(rendered.startswith("\ufeff"))
+        self.assertNotIn("\r", rendered)
+        self.assertTrue(rendered.endswith("\n"))
+        self.assertEqual(
+            payload["entries"],
+            [
+                {
+                    "relativePath": "Archive.ZIP",
+                    "name": "Archive.ZIP",
+                    "parentPath": "",
+                    "entryType": "file",
+                    "linkType": "none",
+                    "extension": ".zip",
+                },
+                {
+                    "relativePath": "docs",
+                    "name": "docs",
+                    "parentPath": "",
+                    "entryType": "directory",
+                    "linkType": "none",
+                    "extension": "",
+                },
+                {
+                    "relativePath": "docs/Guide.MD",
+                    "name": "Guide.MD",
+                    "parentPath": "docs",
+                    "entryType": "file",
+                    "linkType": "none",
+                    "extension": ".md",
+                },
+                {
+                    "relativePath": "README",
+                    "name": "README",
+                    "parentPath": "",
+                    "entryType": "file",
+                    "linkType": "none",
+                    "extension": "",
+                },
+            ],
+        )
+
+    def test_parse_structure_index_rejects_noncanonical_values(self) -> None:
+        valid = """{
+  "schemaVersion": 1,
+  "entries": []
+}
+"""
+        invalid_values = (
+            "\ufeff" + valid,
+            valid.replace("\n", "\r\n"),
+            valid.rstrip("\n"),
+            '{"schemaVersion": 99, "entries": []}\n',
+            """{
+  "entries": [],
+  "schemaVersion": 1
+}
+""",
+            """{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "relativePath": "docs/guide.md",
+      "name": "wrong.md",
+      "parentPath": "docs",
+      "entryType": "file",
+      "linkType": "none",
+      "extension": ".md"
+    }
+  ]
+}
+""",
+        )
+
+        self.assertEqual(parse_structure_index(valid), ())
+
+        for value in invalid_values:
+            with self.subTest(value=repr(value)):
+                with self.assertRaises(StructureIndexFormatError):
+                    parse_structure_index(value)
+
+    def test_structure_index_sync_repairs_missing_and_corrupt_index(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "visible.txt").write_text(
+                "visible",
+                encoding="utf-8",
+            )
+            snapshot = InventoryScanner(repo, PathFilter()).scan()
+            index_path = repo / "cache" / "index.json"
+
+            missing = compare_structure_index(snapshot, index_path)
+            first = sync_structure_index(snapshot, index_path)
+            first_bytes = index_path.read_bytes()
+            index_path.write_text("not json\n", encoding="utf-8")
+            corrupt = compare_structure_index(snapshot, index_path)
+            repaired = sync_structure_index(snapshot, index_path)
+            repaired_bytes = index_path.read_bytes()
+
+        self.assertFalse(missing.is_current)
+        self.assertFalse(missing.previous_exists)
+        self.assertTrue(first.updated)
+        self.assertFalse(first_bytes.startswith(b"\xef\xbb\xbf"))
+        self.assertNotIn(b"\r", first_bytes)
+        self.assertFalse(corrupt.is_current)
+        self.assertIsNotNone(corrupt.format_error)
+        self.assertTrue(repaired.updated)
+        self.assertEqual(repaired_bytes, first_bytes)
+
+    def test_structure_index_does_not_rewrite_current_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "visible.txt").write_text(
+                "visible",
+                encoding="utf-8",
+            )
+            snapshot = InventoryScanner(repo, PathFilter()).scan()
+            index_path = repo / "cache" / "index.json"
+            sync_structure_index(snapshot, index_path)
+
+            with patch(
+                "ai_consult.inventory._write_structure_index"
+            ) as write_mock:
+                result = sync_structure_index(snapshot, index_path)
+
+        self.assertFalse(result.updated)
+        write_mock.assert_not_called()
+
+    def test_structure_index_preserves_link_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            repo = root / "repo"
+            outside = root / "outside"
+            repo.mkdir()
+            outside.mkdir()
+            link = repo / "linked.txt"
+            target = outside / "target.txt"
+            target.write_text("target", encoding="utf-8")
+
+            try:
+                os.symlink(target, link)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"symlink creation failed: {exc}")
+
+            snapshot = InventoryScanner(repo, PathFilter()).scan()
+            parsed = parse_structure_index(
+                render_structure_index(snapshot)
+            )
+
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0].entry_type, InventoryEntryType.FILE)
+        self.assertEqual(parsed[0].link_type, InventoryLinkType.SYMLINK)
+        self.assertEqual(parsed[0].extension, ".txt")
+
+    def test_prepare_structure_index_parent_stays_inside_repo(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            index_path = prepare_structure_index_parent(repo)
+
+        self.assertEqual(
+            index_path.relative_to(repo).as_posix(),
+            "ai-consult-tools/local/cache/repo_structure_index.json",
+        )
 
 
 if __name__ == "__main__":

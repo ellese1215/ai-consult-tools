@@ -14,8 +14,12 @@ from ai_consult.inventory import (
     InventoryScanner,
     InventorySnapshot,
     StructureDiff,
+    StructureIndexComparison,
     compare_folder_tree,
+    compare_structure_index,
+    prepare_structure_index_parent,
     sync_folder_tree,
+    sync_structure_index,
 )
 from ai_consult.path_resolver import PathResolutionError, RepoPathResolver
 
@@ -71,14 +75,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     sync_parser = structure_commands.add_parser(
         "sync",
-        help="update folder_tree.txt when the repository structure changed",
+        help=(
+            "update folder_tree.txt and the local structure index when "
+            "the repository structure changed"
+        ),
     )
     _add_structure_runtime_arguments(sync_parser)
     sync_parser.set_defaults(handler=_run_structure_sync)
 
     check_parser = structure_commands.add_parser(
         "check",
-        help="check folder_tree.txt without modifying files",
+        help=(
+            "check folder_tree.txt and the local structure index without "
+            "modifying files"
+        ),
     )
     _add_structure_runtime_arguments(check_parser)
     check_parser.set_defaults(handler=_run_structure_check)
@@ -120,9 +130,17 @@ def _load_runtime_config(
     return parse_config({"schemaVersion": 1})
 
 
-def _create_snapshot(args: argparse.Namespace) -> InventorySnapshot:
+def _create_snapshot(
+    args: argparse.Namespace,
+    *,
+    prepare_index_parent: bool = False,
+) -> InventorySnapshot:
     repo_root = _resolve_repo_root(args.repo_root)
     config = _load_runtime_config(repo_root, args.config_path)
+
+    if prepare_index_parent:
+        prepare_structure_index_parent(repo_root)
+
     return InventoryScanner.from_config(repo_root, config).scan()
 
 
@@ -158,35 +176,86 @@ def _print_comparison_details(comparison: FolderTreeComparison) -> None:
         _print_diff(comparison.diff)
 
 
-def _run_structure_sync(args: argparse.Namespace) -> int:
-    snapshot = _create_snapshot(args)
-    result = sync_folder_tree(snapshot)
+def _print_index_comparison_details(
+    comparison: StructureIndexComparison,
+) -> None:
+    if comparison.format_error is not None:
+        print(
+            "structure index comparison unavailable: "
+            f"{comparison.format_error}"
+        )
 
-    if result.updated:
-        print("structure sync: updated")
-        _print_comparison_details(result.comparison)
-    else:
-        print("structure sync: current")
+
+def _status(updated: bool) -> str:
+    return "updated" if updated else "current"
+
+
+def _run_structure_sync(args: argparse.Namespace) -> int:
+    snapshot = _create_snapshot(args, prepare_index_parent=True)
+    folder_tree_result = sync_folder_tree(snapshot)
+    structure_index_result = sync_structure_index(snapshot)
+    updated = folder_tree_result.updated or structure_index_result.updated
+
+    print(f"structure sync: {_status(updated)}")
+    print(f"folder tree: {_status(folder_tree_result.updated)}")
+    print(f"structure index: {_status(structure_index_result.updated)}")
+
+    if folder_tree_result.updated:
+        _print_comparison_details(folder_tree_result.comparison)
+
+    if structure_index_result.updated:
+        _print_index_comparison_details(structure_index_result.comparison)
 
     print(f"entries: {len(snapshot.entries)}")
-    print(f"folder tree: {result.comparison.folder_tree_path}")
+    print(
+        "folder tree path: "
+        f"{folder_tree_result.comparison.folder_tree_path}"
+    )
+    print(
+        "structure index path: "
+        f"{structure_index_result.comparison.structure_index_path}"
+    )
     return EXIT_CURRENT
 
 
 def _run_structure_check(args: argparse.Namespace) -> int:
     snapshot = _create_snapshot(args)
-    comparison = compare_folder_tree(snapshot)
+    folder_tree_comparison = compare_folder_tree(snapshot)
+    structure_index_comparison = compare_structure_index(snapshot)
+    is_current = (
+        folder_tree_comparison.is_current
+        and structure_index_comparison.is_current
+    )
 
-    if comparison.is_current:
-        print("structure check: current")
-        print(f"entries: {len(snapshot.entries)}")
-        print(f"folder tree: {comparison.folder_tree_path}")
+    print(
+        "structure check: "
+        f"{'current' if is_current else 'stale'}"
+    )
+    print(
+        "folder tree: "
+        f"{'current' if folder_tree_comparison.is_current else 'stale'}"
+    )
+    print(
+        "structure index: "
+        f"{'current' if structure_index_comparison.is_current else 'stale'}"
+    )
+
+    if not folder_tree_comparison.is_current:
+        _print_comparison_details(folder_tree_comparison)
+
+    if not structure_index_comparison.is_current:
+        _print_index_comparison_details(structure_index_comparison)
+
+    print(f"entries: {len(snapshot.entries)}")
+    print(f"folder tree path: {folder_tree_comparison.folder_tree_path}")
+    print(
+        "structure index path: "
+        f"{structure_index_comparison.structure_index_path}"
+    )
+
+    if is_current:
         return EXIT_CURRENT
 
-    print("structure check: stale")
-    _print_comparison_details(comparison)
-    print(f"entries: {len(snapshot.entries)}")
-    print(f"folder tree: {comparison.folder_tree_path}")
     print("run: python ai-consult-tools/consult.py structure sync")
     return EXIT_STALE
 

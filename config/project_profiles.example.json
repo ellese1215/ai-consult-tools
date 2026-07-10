@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "profiles": {
+    "pavilion_ellese": {
+      "scopeRoots": [
+        "apps/webs/pavilion-ellese",
+        "pavilion-ellese/Resources",
+        "common/Config/pavilion-ellese",
+        "common/src/App",
+        "packages/ts/web",
+        "packages/styles/web/pavilion-ellese",
+        "db",
+        "docs/pavilion-ellese",
+        "docs/projectFiles/エリーゼの館"
+      ]
+    },
+    "tax_ledger": {
+      "scopeRoots": [
+        "apps/tax-ledger"
+      ]
+    },
+    "ai_consult_tools": {
+      "scopeRoots": [
+        "ai-consult-tools"
+      ]
+    }
+  }
+}
