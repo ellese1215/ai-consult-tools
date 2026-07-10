@@ -18,10 +18,15 @@ if str(SRC_ROOT) not in sys.path:
 from ai_consult.config import ConsultConfig, FilterConfig, InventoryConfig
 from ai_consult.filters import PathFilter
 from ai_consult.inventory import (
+    FolderTreeFormatError,
     InventoryError,
     InventoryLinkType,
     InventoryScanner,
+    build_structure_diff,
+    compare_folder_tree,
+    parse_folder_tree,
     render_folder_tree,
+    sync_folder_tree,
 )
 
 
@@ -115,6 +120,10 @@ class InventoryScannerTest(unittest.TestCase):
             repo = Path(temp_dir)
             (repo / "folder_tree.txt").write_text(
                 "generated",
+                encoding="utf-8",
+            )
+            (repo / "folder_tree.txt.v4_tmp").write_text(
+                "temporary",
                 encoding="utf-8",
             )
             (repo / "docs").mkdir()
@@ -274,6 +283,146 @@ class InventoryScannerTest(unittest.TestCase):
             render_folder_tree(snapshot),
             "docs/\ndocs/guide.txt\n",
         )
+
+
+class FolderTreeManagementTest(unittest.TestCase):
+    def test_parse_folder_tree_accepts_new_format(self) -> None:
+        self.assertEqual(
+            parse_folder_tree(
+                "Alpha/\nalpha.txt\nAlpha/b.txt\nzeta.txt\n"
+            ),
+            (
+                "Alpha/",
+                "alpha.txt",
+                "Alpha/b.txt",
+                "zeta.txt",
+            ),
+        )
+
+    def test_parse_folder_tree_rejects_legacy_or_noncanonical_format(
+        self,
+    ) -> None:
+        invalid_values = (
+            "\ufeffdocs/\n",
+            "docs/\r\n",
+            "docs/",
+            "C:/repo/file.txt\n",
+            "docs\\file.txt\n",
+            "z.txt\na.txt\n",
+            "a.txt\na.txt\n",
+            "docs/../secret.txt\n",
+            "docs//guide.txt\n",
+            "docs/./guide.txt\n",
+        )
+
+        for value in invalid_values:
+            with self.subTest(value=repr(value)):
+                with self.assertRaises(FolderTreeFormatError):
+                    parse_folder_tree(value)
+
+    def test_build_structure_diff_reports_unique_move_candidate(
+        self,
+    ) -> None:
+        diff = build_structure_diff(
+            (
+                "docs/old/",
+                "docs/old/guide.md",
+                "keep.txt",
+            ),
+            (
+                "docs/new/",
+                "docs/new/guide.md",
+                "keep.txt",
+            ),
+        )
+
+        self.assertEqual(
+            diff.added_paths,
+            ("docs/new/", "docs/new/guide.md"),
+        )
+        self.assertEqual(
+            diff.removed_paths,
+            ("docs/old/", "docs/old/guide.md"),
+        )
+        self.assertEqual(len(diff.move_candidates), 1)
+        self.assertEqual(
+            diff.move_candidates[0].previous_path,
+            "docs/old/guide.md",
+        )
+        self.assertEqual(
+            diff.move_candidates[0].current_path,
+            "docs/new/guide.md",
+        )
+
+    def test_compare_missing_folder_tree_reports_all_paths_added(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "docs").mkdir()
+            (repo / "docs" / "guide.md").write_text(
+                "guide",
+                encoding="utf-8",
+            )
+            snapshot = InventoryScanner(repo, PathFilter()).scan()
+            comparison = compare_folder_tree(snapshot)
+
+        self.assertFalse(comparison.is_current)
+        self.assertFalse(comparison.previous_exists)
+        self.assertIsNotNone(comparison.diff)
+        self.assertEqual(
+            comparison.diff.added_paths,
+            ("docs/", "docs/guide.md"),
+        )
+
+    def test_sync_writes_utf8_lf_and_does_not_rewrite_current_file(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "資料").mkdir()
+            (repo / "資料" / "設計.md").write_text(
+                "design",
+                encoding="utf-8",
+            )
+            snapshot = InventoryScanner(repo, PathFilter()).scan()
+
+            first = sync_folder_tree(snapshot)
+            tree_path = repo / "folder_tree.txt"
+            first_bytes = tree_path.read_bytes()
+
+            with patch(
+                "ai_consult.inventory._write_folder_tree"
+            ) as write_mock:
+                second = sync_folder_tree(snapshot)
+
+        self.assertTrue(first.updated)
+        self.assertFalse(second.updated)
+        self.assertEqual(
+            first_bytes,
+            "資料/\n資料/設計.md\n".encode("utf-8"),
+        )
+        self.assertFalse(first_bytes.startswith(b"\xef\xbb\xbf"))
+        self.assertNotIn(b"\r", first_bytes)
+        write_mock.assert_not_called()
+
+    def test_sync_replaces_legacy_folder_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "visible.txt").write_text(
+                "visible",
+                encoding="utf-8",
+            )
+            (repo / "folder_tree.txt").write_bytes(
+                "legacy".encode("utf-16-le")
+            )
+            snapshot = InventoryScanner(repo, PathFilter()).scan()
+            result = sync_folder_tree(snapshot)
+            written = (repo / "folder_tree.txt").read_bytes()
+
+        self.assertTrue(result.updated)
+        self.assertIsNotNone(result.comparison.format_error)
+        self.assertEqual(written, b"visible.txt\n")
 
 
 if __name__ == "__main__":

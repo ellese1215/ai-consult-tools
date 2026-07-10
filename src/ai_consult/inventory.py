@@ -4,17 +4,24 @@ import os
 import stat
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from ai_consult.config import ConsultConfig
 from ai_consult.filters import PathFilter
 from ai_consult.path_resolver import RepoPathResolver
 
 
-GENERATED_STRUCTURE_PATHS = frozenset({"folder_tree.txt"})
+GENERATED_STRUCTURE_PATHS = frozenset(
+    {"folder_tree.txt", "folder_tree.txt.v4_tmp"}
+)
+FOLDER_TREE_FILENAME = "folder_tree.txt"
 
 
 class InventoryError(RuntimeError):
+    pass
+
+
+class FolderTreeFormatError(InventoryError):
     pass
 
 
@@ -52,6 +59,34 @@ class InventorySnapshot:
     @property
     def rendered_paths(self) -> tuple[str, ...]:
         return tuple(entry.rendered_path for entry in self.entries)
+
+
+@dataclass(frozen=True)
+class MoveCandidate:
+    previous_path: str
+    current_path: str
+
+
+@dataclass(frozen=True)
+class StructureDiff:
+    added_paths: tuple[str, ...] = ()
+    removed_paths: tuple[str, ...] = ()
+    move_candidates: tuple[MoveCandidate, ...] = ()
+
+
+@dataclass(frozen=True)
+class FolderTreeComparison:
+    folder_tree_path: Path
+    is_current: bool
+    previous_exists: bool
+    diff: StructureDiff | None
+    format_error: str | None = None
+
+
+@dataclass(frozen=True)
+class FolderTreeSyncResult:
+    comparison: FolderTreeComparison
+    updated: bool
 
 
 def _is_junction(path: Path) -> bool:
@@ -232,3 +267,276 @@ def render_folder_tree(snapshot: InventorySnapshot) -> str:
         return ""
 
     return "\n".join(snapshot.rendered_paths) + "\n"
+
+
+def _folder_tree_sort_key(path: str) -> tuple[str, str]:
+    logical_path = path[:-1] if path.endswith("/") else path
+    return logical_path.casefold(), logical_path
+
+
+def _validate_folder_tree_path(path: str) -> None:
+    if not path:
+        raise FolderTreeFormatError("folder_tree.txt contains an empty path")
+
+    if "\\" in path:
+        raise FolderTreeFormatError(
+            f"folder_tree.txt contains a backslash path: {path}"
+        )
+
+    logical_path = path[:-1] if path.endswith("/") else path
+
+    if not logical_path or logical_path.startswith("/"):
+        raise FolderTreeFormatError(
+            f"folder_tree.txt contains an absolute or empty path: {path}"
+        )
+
+    if len(logical_path) >= 3 and logical_path[1:3] == ":/":
+        raise FolderTreeFormatError(
+            f"folder_tree.txt contains an absolute path: {path}"
+        )
+
+    parts = logical_path.split("/")
+
+    if any(part in {"", ".", ".."} for part in parts):
+        raise FolderTreeFormatError(
+            f"folder_tree.txt contains an invalid relative path: {path}"
+        )
+
+
+def parse_folder_tree(text: str) -> tuple[str, ...]:
+    if text.startswith("\ufeff"):
+        raise FolderTreeFormatError("folder_tree.txt must not contain a BOM")
+
+    if "\r" in text:
+        raise FolderTreeFormatError("folder_tree.txt must use LF line endings")
+
+    if "\x00" in text:
+        raise FolderTreeFormatError(
+            "folder_tree.txt contains NUL bytes or a legacy encoding"
+        )
+
+    if not text:
+        return ()
+
+    if not text.endswith("\n"):
+        raise FolderTreeFormatError(
+            "non-empty folder_tree.txt must end with LF"
+        )
+
+    paths = tuple(text[:-1].split("\n"))
+
+    for path in paths:
+        _validate_folder_tree_path(path)
+
+    if len(paths) != len(set(paths)):
+        raise FolderTreeFormatError(
+            "folder_tree.txt contains duplicate paths"
+        )
+
+    expected = tuple(sorted(paths, key=_folder_tree_sort_key))
+
+    if paths != expected:
+        raise FolderTreeFormatError(
+            "folder_tree.txt paths are not in deterministic order"
+        )
+
+    return paths
+
+
+def read_folder_tree(path: str | Path) -> tuple[str, ...]:
+    folder_tree_path = Path(path)
+
+    try:
+        raw = folder_tree_path.read_bytes()
+    except OSError as exc:
+        raise InventoryError(
+            f"cannot read folder_tree.txt: {folder_tree_path}: {exc}"
+        ) from exc
+
+    if raw.startswith(b"\xef\xbb\xbf"):
+        raise FolderTreeFormatError("folder_tree.txt must not contain a BOM")
+
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise FolderTreeFormatError(
+            "folder_tree.txt is not UTF-8"
+        ) from exc
+
+    return parse_folder_tree(text)
+
+
+def _build_move_candidates(
+    removed_paths: tuple[str, ...],
+    added_paths: tuple[str, ...],
+) -> tuple[MoveCandidate, ...]:
+    removed_groups: dict[tuple[bool, str], list[str]] = {}
+    added_groups: dict[tuple[bool, str], list[str]] = {}
+
+    for path in removed_paths:
+        logical_path = path[:-1] if path.endswith("/") else path
+        key = (path.endswith("/"), PurePosixPath(logical_path).name.casefold())
+        removed_groups.setdefault(key, []).append(path)
+
+    for path in added_paths:
+        logical_path = path[:-1] if path.endswith("/") else path
+        key = (path.endswith("/"), PurePosixPath(logical_path).name.casefold())
+        added_groups.setdefault(key, []).append(path)
+
+    candidates: list[MoveCandidate] = []
+
+    for key in sorted(set(removed_groups) & set(added_groups)):
+        previous = removed_groups[key]
+        current = added_groups[key]
+
+        if len(previous) != 1 or len(current) != 1:
+            continue
+
+        candidates.append(
+            MoveCandidate(
+                previous_path=previous[0],
+                current_path=current[0],
+            )
+        )
+
+    candidates.sort(
+        key=lambda item: (
+            _folder_tree_sort_key(item.previous_path),
+            _folder_tree_sort_key(item.current_path),
+        )
+    )
+    return tuple(candidates)
+
+
+def build_structure_diff(
+    previous_paths: tuple[str, ...],
+    current_paths: tuple[str, ...],
+) -> StructureDiff:
+    previous_set = set(previous_paths)
+    current_set = set(current_paths)
+    added_paths = tuple(
+        sorted(current_set - previous_set, key=_folder_tree_sort_key)
+    )
+    removed_paths = tuple(
+        sorted(previous_set - current_set, key=_folder_tree_sort_key)
+    )
+
+    return StructureDiff(
+        added_paths=added_paths,
+        removed_paths=removed_paths,
+        move_candidates=_build_move_candidates(
+            removed_paths,
+            added_paths,
+        ),
+    )
+
+
+def compare_folder_tree(
+    snapshot: InventorySnapshot,
+    folder_tree_path: str | Path | None = None,
+) -> FolderTreeComparison:
+    target = (
+        Path(folder_tree_path)
+        if folder_tree_path is not None
+        else snapshot.repo_root / FOLDER_TREE_FILENAME
+    )
+    desired = render_folder_tree(snapshot).encode("utf-8")
+
+    try:
+        raw = target.read_bytes()
+    except FileNotFoundError:
+        return FolderTreeComparison(
+            folder_tree_path=target,
+            is_current=False,
+            previous_exists=False,
+            diff=build_structure_diff((), snapshot.rendered_paths),
+        )
+    except OSError as exc:
+        raise InventoryError(
+            f"cannot read folder_tree.txt: {target}: {exc}"
+        ) from exc
+
+    if raw == desired:
+        return FolderTreeComparison(
+            folder_tree_path=target,
+            is_current=True,
+            previous_exists=True,
+            diff=StructureDiff(),
+        )
+
+    try:
+        previous_paths = read_folder_tree(target)
+    except FolderTreeFormatError as exc:
+        return FolderTreeComparison(
+            folder_tree_path=target,
+            is_current=False,
+            previous_exists=True,
+            diff=None,
+            format_error=str(exc),
+        )
+
+    return FolderTreeComparison(
+        folder_tree_path=target,
+        is_current=False,
+        previous_exists=True,
+        diff=build_structure_diff(
+            previous_paths,
+            snapshot.rendered_paths,
+        ),
+    )
+
+
+def _write_folder_tree(path: Path, text: str) -> None:
+    temporary_path = path.with_name(path.name + ".v4_tmp")
+
+    try:
+        temporary_path.unlink(missing_ok=True)
+
+        with temporary_path.open("xb") as stream:
+            stream.write(text.encode("utf-8"))
+
+        os.replace(temporary_path, path)
+    except OSError as exc:
+        try:
+            temporary_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+        raise InventoryError(
+            f"cannot write folder_tree.txt: {path}: {exc}"
+        ) from exc
+
+
+def sync_folder_tree(
+    snapshot: InventorySnapshot,
+    folder_tree_path: str | Path | None = None,
+) -> FolderTreeSyncResult:
+    comparison = compare_folder_tree(snapshot, folder_tree_path)
+
+    if comparison.is_current:
+        return FolderTreeSyncResult(
+            comparison=comparison,
+            updated=False,
+        )
+
+    text = render_folder_tree(snapshot)
+    _write_folder_tree(comparison.folder_tree_path, text)
+
+    try:
+        written = comparison.folder_tree_path.read_bytes()
+    except OSError as exc:
+        raise InventoryError(
+            "cannot verify written folder_tree.txt: "
+            f"{comparison.folder_tree_path}: {exc}"
+        ) from exc
+
+    if written != text.encode("utf-8"):
+        raise InventoryError(
+            "folder_tree.txt verification failed after write: "
+            f"{comparison.folder_tree_path}"
+        )
+
+    return FolderTreeSyncResult(
+        comparison=comparison,
+        updated=True,
+    )
