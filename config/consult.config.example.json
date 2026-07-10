@@ -7,8 +7,7 @@
       "vendor",
       "ai-consult-tools/archive/",
       "ai-consult-tools/chatgpt/consult_case/",
-      "ai-consult-tools/claude/consult_case/",
-      "ai-consult-tools/local/"
+      "ai-consult-tools/claude/consult_case/"
     ],
     "binaryExtensions": [
       ".psd",
@@ -18,5 +17,11 @@
   },
   "inventory": {
     "excludePaths": []
+  },
+  "includeSets": {
+    "common_rules": [
+      "ai-consult-tools/shared/00_ai_consult_operation_rules.md",
+      "ai-consult-tools/local/chatgpt/consult.local_chatgpt.md"
+    ]
   }
 }

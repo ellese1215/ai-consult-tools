@@ -3,16 +3,17 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
+import hashlib
+import os
 from pathlib import Path
 
 from ai_consult.config import ConsultConfig
 from ai_consult.filters import (
     BinaryFileError,
-    FilterError,
     PathFilter,
     TextDecodeError,
     TextFileTooLargeError,
-    read_text_file,
+    decode_text_bytes,
 )
 from ai_consult.path_resolver import (
     PathOutsideRepoError,
@@ -42,7 +43,9 @@ class CollectedTextFile:
     relative_path: str
     logical_path: Path
     real_path: Path
+    real_relative_path: str
     size_bytes: int
+    source_sha256: str
     encoding: str
     text: str
 
@@ -177,9 +180,37 @@ class ExplicitFileCollector:
             )
 
         try:
-            decoded = read_text_file(
-                resolved.real_path,
-                max_bytes=self._max_text_bytes,
+            with resolved.real_path.open("rb") as handle:
+                before = os.fstat(handle.fileno())
+
+                if before.st_size > self._max_text_bytes:
+                    raise TextFileTooLargeError(
+                        "text file exceeds limit: "
+                        f"{resolved.real_path}: {before.st_size} bytes > "
+                        f"{self._max_text_bytes} bytes"
+                    )
+
+                source = handle.read()
+                after = os.fstat(handle.fileno())
+
+            if (
+                before.st_size != after.st_size
+                or before.st_mtime_ns != after.st_mtime_ns
+                or len(source) != after.st_size
+            ):
+                return CollectionResult(
+                    requested_path=requested_text,
+                    status=CollectionStatus.READ_ERROR,
+                    relative_path=resolved.relative_path,
+                    reason=(
+                        "file changed while being collected: "
+                        f"{resolved.real_path}"
+                    ),
+                )
+
+            decoded = decode_text_bytes(
+                source,
+                path=resolved.real_path,
                 binary_extensions=self._binary_extensions,
             )
         except BinaryFileError as exc:
@@ -203,23 +234,13 @@ class ExplicitFileCollector:
                 relative_path=resolved.relative_path,
                 reason=str(exc),
             )
-        except FilterError as exc:
-            return CollectionResult(
-                requested_path=requested_text,
-                status=CollectionStatus.READ_ERROR,
-                relative_path=resolved.relative_path,
-                reason=str(exc),
-            )
-
-        try:
-            size_bytes = resolved.real_path.stat().st_size
         except OSError as exc:
             return CollectionResult(
                 requested_path=requested_text,
                 status=CollectionStatus.READ_ERROR,
                 relative_path=resolved.relative_path,
                 reason=(
-                    "cannot stat collected file: "
+                    "cannot read collected file: "
                     f"{resolved.real_path}: {exc}"
                 ),
             )
@@ -229,7 +250,9 @@ class ExplicitFileCollector:
             relative_path=resolved.relative_path,
             logical_path=resolved.logical_path,
             real_path=resolved.real_path,
-            size_bytes=size_bytes,
+            real_relative_path=real_relative_path,
+            size_bytes=len(source),
+            source_sha256=hashlib.sha256(source).hexdigest(),
             encoding=decoded.encoding,
             text=decoded.text,
         )

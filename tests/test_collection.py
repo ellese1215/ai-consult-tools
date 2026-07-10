@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import os
 import subprocess
@@ -104,9 +105,18 @@ class ExplicitFileCollectorTest(unittest.TestCase):
                 result.file.text,
                 "日本語ガイド",
             )
+            source = target.read_bytes()
             self.assertEqual(
                 result.file.size_bytes,
-                target.stat().st_size,
+                len(source),
+            )
+            self.assertEqual(
+                result.file.source_sha256,
+                hashlib.sha256(source).hexdigest(),
+            )
+            self.assertEqual(
+                result.file.real_relative_path,
+                "docs/guide.txt",
             )
 
     def test_excluded_explicit_file_is_reported(self) -> None:

@@ -1,10 +1,23 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
-from ai_consult.config import ProjectProfile
+from ai_consult.bundle import (
+    BundleItem,
+    BundleOrigin,
+    ContentKind,
+    PathResolution,
+    SkippedItem,
+)
+from ai_consult.collection import (
+    CollectionResult,
+    CollectionStatus,
+    ExplicitFileCollector,
+)
+from ai_consult.config import ConsultConfig, ProjectProfile
 from ai_consult.inventory import (
     FolderTreeComparison,
     InventoryEntry,
@@ -14,6 +27,10 @@ from ai_consult.inventory import (
     StructureDiff,
     StructureIndexComparison,
     STRUCTURE_INDEX_RELATIVE_PATH,
+)
+from ai_consult.path_resolver import (
+    PathResolutionError,
+    RepoPathResolver,
 )
 
 
@@ -543,3 +560,482 @@ def _render_path_list(paths: tuple[str, ...]) -> list[str]:
 
 def _escape_table_cell(value: str) -> str:
     return value.replace("\r", " ").replace("\n", " ").replace("|", "\\|")
+
+class StartBundleCollectionError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class StartFileRequest:
+    requested_path: str
+    origin: BundleOrigin
+    include_set_name: str | None = None
+
+    def __post_init__(self) -> None:
+        _validate_start_relative_path(
+            self.requested_path,
+            "requested_path",
+        )
+
+        if self.origin not in {
+            BundleOrigin.EXPLICIT,
+            BundleOrigin.INCLUDE_SET,
+        }:
+            raise StartBundleCollectionError(
+                "start request origin must be explicit or include_set"
+            )
+
+        if self.origin is BundleOrigin.INCLUDE_SET:
+            if (
+                not isinstance(self.include_set_name, str)
+                or not self.include_set_name
+                or self.include_set_name != self.include_set_name.strip()
+            ):
+                raise StartBundleCollectionError(
+                    "include_set request requires include_set_name"
+                )
+        elif self.include_set_name is not None:
+            raise StartBundleCollectionError(
+                "explicit request must not set include_set_name"
+            )
+
+    @property
+    def source_label(self) -> str:
+        if self.origin is BundleOrigin.INCLUDE_SET:
+            assert self.include_set_name is not None
+            return f"include-set:{self.include_set_name}"
+
+        return "include-paths"
+
+
+@dataclass(frozen=True)
+class StartCollectionSnapshot:
+    requests: tuple[StartFileRequest, ...] = ()
+    items: tuple[BundleItem, ...] = ()
+    path_resolutions: tuple[PathResolution, ...] = ()
+    skipped_items: tuple[SkippedItem, ...] = ()
+
+    def __post_init__(self) -> None:
+        requests = tuple(self.requests)
+        items = tuple(self.items)
+        resolutions = tuple(self.path_resolutions)
+        skipped_items = tuple(self.skipped_items)
+        object.__setattr__(self, "requests", requests)
+        object.__setattr__(self, "items", items)
+        object.__setattr__(self, "path_resolutions", resolutions)
+        object.__setattr__(self, "skipped_items", skipped_items)
+
+        if not all(isinstance(item, StartFileRequest) for item in requests):
+            raise StartBundleCollectionError(
+                "requests must contain only StartFileRequest values"
+            )
+
+        if not all(isinstance(item, BundleItem) for item in items):
+            raise StartBundleCollectionError(
+                "items must contain only BundleItem values"
+            )
+
+        if not all(isinstance(item, PathResolution) for item in resolutions):
+            raise StartBundleCollectionError(
+                "path_resolutions must contain only PathResolution values"
+            )
+
+        if not all(isinstance(item, SkippedItem) for item in skipped_items):
+            raise StartBundleCollectionError(
+                "skipped_items must contain only SkippedItem values"
+            )
+
+        if len(requests) != len(resolutions):
+            raise StartBundleCollectionError(
+                "each start request requires one path resolution"
+            )
+
+        for request, resolution in zip(requests, resolutions, strict=True):
+            if request.requested_path != resolution.requested_path:
+                raise StartBundleCollectionError(
+                    "request and path resolution paths must match"
+                )
+
+            if request.origin is not resolution.origin:
+                raise StartBundleCollectionError(
+                    "request and path resolution origins must match"
+                )
+
+        seen_items: set[str] = set()
+
+        for item in items:
+            if item.origin not in {
+                BundleOrigin.EXPLICIT,
+                BundleOrigin.INCLUDE_SET,
+            }:
+                raise StartBundleCollectionError(
+                    "start collection items must use explicit or include_set origin"
+                )
+
+            folded = item.relative_path.casefold()
+
+            if folded in seen_items:
+                raise StartBundleCollectionError(
+                    "start collection contains duplicate bundle items: "
+                    f"{item.relative_path}"
+                )
+
+            seen_items.add(folded)
+
+
+def build_start_file_requests(
+    config: ConsultConfig,
+    *,
+    include_set_names: Iterable[str] = (),
+    explicit_paths: Iterable[str] = (),
+) -> tuple[StartFileRequest, ...]:
+    _require_type(config, ConsultConfig, "config")
+    names = _normalize_start_strings(
+        include_set_names,
+        "include_set_names",
+    )
+    paths = _normalize_start_strings(
+        explicit_paths,
+        "explicit_paths",
+    )
+    requests: list[StartFileRequest] = []
+
+    for name in names:
+        try:
+            include_set = config.get_include_set(name)
+        except ValueError as exc:
+            raise StartBundleCollectionError(str(exc)) from exc
+
+        requests.extend(
+            StartFileRequest(
+                requested_path=path,
+                origin=BundleOrigin.INCLUDE_SET,
+                include_set_name=include_set.name,
+            )
+            for path in include_set.paths
+        )
+
+    requests.extend(
+        StartFileRequest(
+            requested_path=path,
+            origin=BundleOrigin.EXPLICIT,
+        )
+        for path in paths
+    )
+    return tuple(requests)
+
+
+def collect_start_files(
+    repo_root: str | Path,
+    config: ConsultConfig,
+    profile: ProjectProfile,
+    *,
+    include_set_names: Iterable[str] = (),
+    explicit_paths: Iterable[str] = (),
+) -> StartCollectionSnapshot:
+    _require_type(config, ConsultConfig, "config")
+    _require_type(profile, ProjectProfile, "profile")
+    requests = build_start_file_requests(
+        config,
+        include_set_names=include_set_names,
+        explicit_paths=explicit_paths,
+    )
+
+    try:
+        resolver = RepoPathResolver(repo_root)
+        collector = ExplicitFileCollector.from_config(repo_root, config)
+    except (ValueError, OSError) as exc:
+        raise StartBundleCollectionError(
+            f"cannot initialize start file collection: {exc}"
+        ) from exc
+
+    results: list[CollectionResult] = []
+
+    for request in requests:
+        if request.origin is BundleOrigin.INCLUDE_SET:
+            if not profile.contains(request.requested_path):
+                results.append(
+                    CollectionResult(
+                        requested_path=request.requested_path,
+                        status=CollectionStatus.EXCLUDED,
+                        relative_path=request.requested_path,
+                        reason=_outside_profile_reason(
+                            request.requested_path,
+                            profile,
+                        ),
+                    )
+                )
+                continue
+
+            try:
+                resolved = resolver.resolve(
+                    request.requested_path,
+                    must_exist=True,
+                    allow_file=True,
+                    allow_directory=False,
+                )
+            except PathResolutionError:
+                pass
+            else:
+                real_relative_path = resolved.real_path.relative_to(
+                    resolver.repo_root
+                ).as_posix()
+
+                if not profile.contains(real_relative_path):
+                    results.append(
+                        CollectionResult(
+                            requested_path=request.requested_path,
+                            status=CollectionStatus.EXCLUDED,
+                            relative_path=resolved.relative_path,
+                            reason=_outside_profile_reason(
+                                resolved.relative_path,
+                                profile,
+                                real_relative_path=real_relative_path,
+                            ),
+                        )
+                    )
+                    continue
+
+        results.append(collector.collect_one(request.requested_path))
+
+    return build_start_collection_snapshot(
+        profile,
+        requests,
+        tuple(results),
+    )
+
+
+def build_start_collection_snapshot(
+    profile: ProjectProfile,
+    requests: Iterable[StartFileRequest],
+    results: Iterable[CollectionResult],
+) -> StartCollectionSnapshot:
+    _require_type(profile, ProjectProfile, "profile")
+    request_values = tuple(requests)
+    result_values = tuple(results)
+
+    if len(request_values) != len(result_values):
+        raise StartBundleCollectionError(
+            "requests and collection results must have the same length"
+        )
+
+    items: list[BundleItem] = []
+    resolutions: list[PathResolution] = []
+    skipped_items: list[SkippedItem] = []
+    included_by_path: dict[str, tuple[BundleItem, StartFileRequest]] = {}
+
+    for request, result in zip(request_values, result_values, strict=True):
+        if not isinstance(request, StartFileRequest):
+            raise StartBundleCollectionError(
+                "requests must contain only StartFileRequest values"
+            )
+
+        if not isinstance(result, CollectionResult):
+            raise StartBundleCollectionError(
+                "results must contain only CollectionResult values"
+            )
+
+        if result.requested_path != request.requested_path:
+            raise StartBundleCollectionError(
+                "collection result does not match start request: "
+                f"request={request.requested_path}; "
+                f"result={result.requested_path}"
+            )
+
+        if not result.included:
+            reason = result.reason or "collection failed without a reason"
+            resolutions.append(
+                PathResolution(
+                    requested_path=request.requested_path,
+                    status=result.status,
+                    origin=request.origin,
+                    reason=reason,
+                )
+            )
+            skipped_items.append(
+                SkippedItem(
+                    requested_path=request.requested_path,
+                    status=result.status,
+                    origin=request.origin,
+                    reason=reason,
+                    relative_path=result.relative_path,
+                )
+            )
+            continue
+
+        if result.file is None or result.relative_path is None:
+            raise StartBundleCollectionError(
+                "included collection result requires file metadata"
+            )
+
+        collected = result.file
+
+        if (
+            collected.relative_path != result.relative_path
+            or collected.requested_path != request.requested_path
+        ):
+            raise StartBundleCollectionError(
+                "included collection metadata is inconsistent"
+            )
+
+        if request.origin is BundleOrigin.INCLUDE_SET and (
+            not profile.contains(collected.relative_path)
+            or not profile.contains(collected.real_relative_path)
+        ):
+            reason = _outside_profile_reason(
+                collected.relative_path,
+                profile,
+                real_relative_path=collected.real_relative_path,
+            )
+            resolutions.append(
+                PathResolution(
+                    requested_path=request.requested_path,
+                    status=CollectionStatus.EXCLUDED,
+                    origin=request.origin,
+                    reason=reason,
+                )
+            )
+            skipped_items.append(
+                SkippedItem(
+                    requested_path=request.requested_path,
+                    status=CollectionStatus.EXCLUDED,
+                    origin=request.origin,
+                    reason=reason,
+                    relative_path=collected.relative_path,
+                )
+            )
+            continue
+
+        folded_path = collected.relative_path.casefold()
+        previous = included_by_path.get(folded_path)
+
+        if previous is not None:
+            previous_item, previous_request = previous
+            resolutions.append(
+                PathResolution(
+                    requested_path=request.requested_path,
+                    status=CollectionStatus.INCLUDED,
+                    origin=request.origin,
+                    resolved_paths=(previous_item.relative_path,),
+                    reason=(
+                        "duplicate request; content already included by "
+                        f"{previous_request.source_label}: "
+                        f"{previous_request.requested_path}"
+                    ),
+                )
+            )
+            continue
+
+        item = BundleItem(
+            relative_path=collected.relative_path,
+            content_kind=ContentKind.TEXT,
+            origin=request.origin,
+            content=collected.text,
+            encoding=collected.encoding,
+            source_bytes=collected.size_bytes,
+            source_sha256=collected.source_sha256,
+        )
+        items.append(item)
+        included_by_path[folded_path] = (item, request)
+        resolutions.append(
+            PathResolution(
+                requested_path=request.requested_path,
+                status=CollectionStatus.INCLUDED,
+                origin=request.origin,
+                resolved_paths=(collected.relative_path,),
+            )
+        )
+
+    return StartCollectionSnapshot(
+        requests=request_values,
+        items=tuple(items),
+        path_resolutions=tuple(resolutions),
+        skipped_items=tuple(skipped_items),
+    )
+
+
+def _normalize_start_strings(
+    values: Iterable[str],
+    context: str,
+) -> tuple[str, ...]:
+    if isinstance(values, (str, bytes)):
+        raise StartBundleCollectionError(
+            f"{context} must be an iterable of strings"
+        )
+
+    result = tuple(values)
+
+    for index, value in enumerate(result):
+        if not isinstance(value, str):
+            raise StartBundleCollectionError(
+                f"{context}[{index}] must be a string"
+            )
+
+        if context == "explicit_paths":
+            _validate_start_relative_path(
+                value,
+                f"{context}[{index}]",
+            )
+        elif not value or value != value.strip():
+            raise StartBundleCollectionError(
+                f"{context}[{index}] must be a non-empty trimmed string"
+            )
+
+    return result
+
+
+def _validate_start_relative_path(value: str, context: str) -> None:
+    if not isinstance(value, str) or not value:
+        raise StartBundleCollectionError(
+            f"{context} must be a non-empty string"
+        )
+
+    if value != value.strip():
+        raise StartBundleCollectionError(
+            f"{context} must not contain leading or trailing whitespace"
+        )
+
+    if "\\" in value:
+        raise StartBundleCollectionError(
+            f"{context} must use / separators: {value}"
+        )
+
+    if value.startswith("/") or (len(value) >= 3 and value[1:3] == ":/"):
+        raise StartBundleCollectionError(
+            f"{context} must be RepoRoot-relative: {value}"
+        )
+
+    if value.endswith("/"):
+        raise StartBundleCollectionError(
+            f"{context} must not end with /: {value}"
+        )
+
+    if any(part in {"", ".", ".."} for part in value.split("/")):
+        raise StartBundleCollectionError(
+            f"{context} is not a canonical path: {value}"
+        )
+
+    if any(character in value for character in "*?["):
+        raise StartBundleCollectionError(
+            f"{context} must not contain wildcards: {value}"
+        )
+
+
+def _outside_profile_reason(
+    relative_path: str,
+    profile: ProjectProfile,
+    *,
+    real_relative_path: str | None = None,
+) -> str:
+    reason = (
+        "include-set path is outside project profile: "
+        f"profile={profile.name}; path={relative_path}"
+    )
+
+    if (
+        real_relative_path is not None
+        and real_relative_path.casefold() != relative_path.casefold()
+    ):
+        reason += f"; target={real_relative_path}"
+
+    return reason

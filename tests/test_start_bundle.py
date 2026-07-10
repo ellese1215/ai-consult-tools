@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -12,7 +14,18 @@ SRC_ROOT = TOOL_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from ai_consult.config import ProjectProfile
+from ai_consult.bundle import BundleOrigin
+from ai_consult.collection import (
+    CollectedTextFile,
+    CollectionResult,
+    CollectionStatus,
+)
+from ai_consult.config import (
+    ConsultConfig,
+    FilterConfig,
+    IncludeSetConfig,
+    ProjectProfile,
+)
 from ai_consult.inventory import (
     FolderTreeComparison,
     InventoryEntry,
@@ -23,10 +36,15 @@ from ai_consult.inventory import (
     StructureIndexComparison,
 )
 from ai_consult.start_bundle import (
+    StartBundleCollectionError,
     StartBundleStructureError,
+    StartFileRequest,
     StructureState,
     build_project_tree,
+    build_start_collection_snapshot,
+    build_start_file_requests,
     build_structure_status,
+    collect_start_files,
     render_project_tree,
     render_structure_status,
     select_profile_entries,
@@ -438,6 +456,315 @@ class StructureStatusTest(unittest.TestCase):
 
         with self.assertRaises(dataclasses.FrozenInstanceError):
             status.profile_name = "other"  # type: ignore[misc]
+
+
+class StartFileCollectionTest(unittest.TestCase):
+    def make_config(self) -> ConsultConfig:
+        return ConsultConfig(
+            schema_version=1,
+            filters=FilterConfig(),
+            include_sets=(
+                IncludeSetConfig(
+                    name="common",
+                    paths=("project/a.md", "project/b.md"),
+                ),
+                IncludeSetConfig(
+                    name="extra",
+                    paths=("project/c.md",),
+                ),
+            ),
+        )
+
+    def test_builds_requests_in_approved_order(self) -> None:
+        requests = build_start_file_requests(
+            self.make_config(),
+            include_set_names=("extra", "common"),
+            explicit_paths=("outside/one.md", "outside/two.md"),
+        )
+
+        self.assertEqual(
+            tuple(
+                (
+                    item.requested_path,
+                    item.origin,
+                    item.include_set_name,
+                )
+                for item in requests
+            ),
+            (
+                ("project/c.md", BundleOrigin.INCLUDE_SET, "extra"),
+                ("project/a.md", BundleOrigin.INCLUDE_SET, "common"),
+                ("project/b.md", BundleOrigin.INCLUDE_SET, "common"),
+                ("outside/one.md", BundleOrigin.EXPLICIT, None),
+                ("outside/two.md", BundleOrigin.EXPLICIT, None),
+            ),
+        )
+
+    def test_rejects_unknown_set_and_invalid_explicit_path(self) -> None:
+        with self.assertRaisesRegex(
+            StartBundleCollectionError,
+            "unknown include set",
+        ):
+            build_start_file_requests(
+                self.make_config(),
+                include_set_names=("missing",),
+            )
+
+        with self.assertRaises(StartBundleCollectionError):
+            build_start_file_requests(
+                self.make_config(),
+                explicit_paths=("../outside.md",),
+            )
+
+    def test_include_set_stays_in_profile_and_explicit_can_cross_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "project").mkdir()
+            (repo / "shared").mkdir()
+            (repo / "project" / "inside.md").write_text(
+                "inside",
+                encoding="utf-8",
+            )
+            (repo / "shared" / "rules.md").write_text(
+                "rules",
+                encoding="utf-8",
+            )
+            config = ConsultConfig(
+                schema_version=1,
+                filters=FilterConfig(),
+                include_sets=(
+                    IncludeSetConfig(
+                        name="mixed",
+                        paths=(
+                            "project/inside.md",
+                            "shared/rules.md",
+                        ),
+                    ),
+                ),
+            )
+            snapshot = collect_start_files(
+                repo,
+                config,
+                ProjectProfile(
+                    name="project",
+                    scope_roots=("project",),
+                ),
+                include_set_names=("mixed",),
+                explicit_paths=("shared/rules.md",),
+            )
+
+        self.assertEqual(
+            tuple(item.relative_path for item in snapshot.items),
+            ("project/inside.md", "shared/rules.md"),
+        )
+        self.assertEqual(
+            tuple(item.origin for item in snapshot.items),
+            (BundleOrigin.INCLUDE_SET, BundleOrigin.EXPLICIT),
+        )
+        self.assertEqual(
+            tuple(item.status for item in snapshot.path_resolutions),
+            (
+                CollectionStatus.INCLUDED,
+                CollectionStatus.EXCLUDED,
+                CollectionStatus.INCLUDED,
+            ),
+        )
+        self.assertEqual(len(snapshot.skipped_items), 1)
+        self.assertIn(
+            "outside project profile",
+            snapshot.skipped_items[0].reason,
+        )
+
+    def test_duplicate_requests_keep_all_resolutions_and_one_item(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            target = repo / "project" / "a.md"
+            target.parent.mkdir()
+            target.write_text("alpha", encoding="utf-8")
+            config = ConsultConfig(
+                schema_version=1,
+                filters=FilterConfig(),
+                include_sets=(
+                    IncludeSetConfig(
+                        name="common",
+                        paths=("project/a.md",),
+                    ),
+                ),
+            )
+            snapshot = collect_start_files(
+                repo,
+                config,
+                ProjectProfile(
+                    name="project",
+                    scope_roots=("project",),
+                ),
+                include_set_names=("common",),
+                explicit_paths=("project/a.md",),
+            )
+
+        self.assertEqual(len(snapshot.requests), 2)
+        self.assertEqual(len(snapshot.path_resolutions), 2)
+        self.assertEqual(len(snapshot.items), 1)
+        self.assertEqual(len(snapshot.skipped_items), 0)
+        self.assertIs(
+            snapshot.items[0].origin,
+            BundleOrigin.INCLUDE_SET,
+        )
+        self.assertIsNone(snapshot.path_resolutions[0].reason)
+        self.assertIn(
+            "duplicate request",
+            snapshot.path_resolutions[1].reason or "",
+        )
+
+    def test_case_insensitive_duplicate_uses_first_successful_origin(self) -> None:
+        source = b"alpha"
+        first_request = StartFileRequest(
+            requested_path="project/A.md",
+            origin=BundleOrigin.INCLUDE_SET,
+            include_set_name="common",
+        )
+        second_request = StartFileRequest(
+            requested_path="project/a.md",
+            origin=BundleOrigin.EXPLICIT,
+        )
+        results = (
+            self.included_result(first_request, "project/A.md", source),
+            self.included_result(second_request, "project/a.md", source),
+        )
+        snapshot = build_start_collection_snapshot(
+            ProjectProfile(
+                name="project",
+                scope_roots=("project",),
+            ),
+            (first_request, second_request),
+            results,
+        )
+
+        self.assertEqual(len(snapshot.items), 1)
+        self.assertEqual(snapshot.items[0].relative_path, "project/A.md")
+        self.assertIs(snapshot.items[0].origin, BundleOrigin.INCLUDE_SET)
+        self.assertEqual(
+            snapshot.path_resolutions[1].resolved_paths,
+            ("project/A.md",),
+        )
+
+    def test_failure_does_not_claim_first_successful_origin(self) -> None:
+        source = b"alpha"
+        failed_request = StartFileRequest(
+            requested_path="project/a.md",
+            origin=BundleOrigin.INCLUDE_SET,
+            include_set_name="common",
+        )
+        successful_request = StartFileRequest(
+            requested_path="project/a.md",
+            origin=BundleOrigin.EXPLICIT,
+        )
+        results = (
+            CollectionResult(
+                requested_path="project/a.md",
+                status=CollectionStatus.MISSING,
+                reason="missing",
+            ),
+            self.included_result(
+                successful_request,
+                "project/a.md",
+                source,
+            ),
+        )
+        snapshot = build_start_collection_snapshot(
+            ProjectProfile(
+                name="project",
+                scope_roots=("project",),
+            ),
+            (failed_request, successful_request),
+            results,
+        )
+
+        self.assertEqual(len(snapshot.items), 1)
+        self.assertIs(snapshot.items[0].origin, BundleOrigin.EXPLICIT)
+        self.assertEqual(len(snapshot.skipped_items), 1)
+
+    def test_include_set_cannot_escape_profile_through_resolved_target(self) -> None:
+        source = b"secret"
+        request = StartFileRequest(
+            requested_path="project/link.md",
+            origin=BundleOrigin.INCLUDE_SET,
+            include_set_name="common",
+        )
+        result = self.included_result(
+            request,
+            "project/link.md",
+            source,
+            real_relative_path="other/secret.md",
+        )
+        snapshot = build_start_collection_snapshot(
+            ProjectProfile(
+                name="project",
+                scope_roots=("project",),
+            ),
+            (request,),
+            (result,),
+        )
+
+        self.assertEqual(snapshot.items, ())
+        self.assertEqual(len(snapshot.skipped_items), 1)
+        self.assertIn("target=other/secret.md", snapshot.skipped_items[0].reason)
+
+    def test_snapshot_is_frozen_and_requires_parallel_resolutions(self) -> None:
+        snapshot = build_start_collection_snapshot(
+            ProjectProfile(
+                name="project",
+                scope_roots=("project",),
+            ),
+            (),
+            (),
+        )
+
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            snapshot.items = ()  # type: ignore[misc]
+
+        with self.assertRaises(StartBundleCollectionError):
+            build_start_collection_snapshot(
+                ProjectProfile(
+                    name="project",
+                    scope_roots=("project",),
+                ),
+                (
+                    StartFileRequest(
+                        requested_path="project/a.md",
+                        origin=BundleOrigin.EXPLICIT,
+                    ),
+                ),
+                (),
+            )
+
+    @staticmethod
+    def included_result(
+        request: StartFileRequest,
+        relative_path: str,
+        source: bytes,
+        *,
+        real_relative_path: str | None = None,
+    ) -> CollectionResult:
+        logical = Path("/repo") / relative_path
+        real_relative = real_relative_path or relative_path
+        collected = CollectedTextFile(
+            requested_path=request.requested_path,
+            relative_path=relative_path,
+            logical_path=logical,
+            real_path=Path("/repo") / real_relative,
+            real_relative_path=real_relative,
+            size_bytes=len(source),
+            source_sha256=hashlib.sha256(source).hexdigest(),
+            encoding="utf-8",
+            text=source.decode("utf-8"),
+        )
+        return CollectionResult(
+            requested_path=request.requested_path,
+            status=CollectionStatus.INCLUDED,
+            relative_path=relative_path,
+            file=collected,
+        )
 
 
 if __name__ == "__main__":

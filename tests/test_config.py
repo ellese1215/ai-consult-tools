@@ -58,6 +58,80 @@ class ConfigTest(unittest.TestCase):
             "private/generated/",
         )
 
+
+    def test_parses_include_sets_and_preserves_path_order(self) -> None:
+        config = parse_config(
+            {
+                "schemaVersion": 1,
+                "filters": {},
+                "includeSets": {
+                    "common_rules": [
+                        "project/rules.md",
+                        "project/local.md",
+                        "project/rules.md",
+                    ],
+                    "review": ["project/status.md"],
+                },
+            }
+        )
+
+        self.assertEqual(
+            tuple(item.name for item in config.include_sets),
+            ("common_rules", "review"),
+        )
+        self.assertEqual(
+            config.get_include_set("COMMON_RULES").paths,
+            (
+                "project/rules.md",
+                "project/local.md",
+                "project/rules.md",
+            ),
+        )
+
+    def test_rejects_invalid_include_sets(self) -> None:
+        invalid_values = (
+            [],
+            {"": ["project/a.md"]},
+            {" common": ["project/a.md"]},
+            {"common": []},
+            {"common": "project/a.md"},
+            {"common": ["project/"]},
+            {"common": ["../project/a.md"]},
+            {"common": ["project\\a.md"]},
+            {
+                "Common": ["project/a.md"],
+                "common": ["project/b.md"],
+            },
+        )
+
+        for value in invalid_values:
+            with self.subTest(value=value):
+                with self.assertRaises(ConfigError):
+                    parse_config(
+                        {
+                            "schemaVersion": 1,
+                            "filters": {},
+                            "includeSets": value,
+                        }
+                    )
+
+    def test_unknown_include_set_lists_available_names(self) -> None:
+        config = parse_config(
+            {
+                "schemaVersion": 1,
+                "filters": {},
+                "includeSets": {
+                    "common_rules": ["project/rules.md"],
+                },
+            }
+        )
+
+        with self.assertRaisesRegex(
+            ConfigError,
+            "available: common_rules",
+        ):
+            config.get_include_set("missing")
+
     def test_inventory_defaults_are_applied_without_section(self) -> None:
         config = parse_config(
             {
@@ -125,6 +199,24 @@ class ConfigTest(unittest.TestCase):
                     },
                 }
             )
+
+
+    def test_loads_common_config_example_with_common_rules(self) -> None:
+        config = load_config(
+            TOOL_ROOT / "config" / "consult.config.example.json"
+        )
+
+        self.assertEqual(
+            config.get_include_set("common_rules").paths,
+            (
+                "ai-consult-tools/shared/00_ai_consult_operation_rules.md",
+                "ai-consult-tools/local/chatgpt/consult.local_chatgpt.md",
+            ),
+        )
+        self.assertNotIn(
+            "ai-consult-tools/local/",
+            config.filters.exclude_paths,
+        )
 
     def test_loads_utf8_bom_json(self) -> None:
         payload = {

@@ -68,10 +68,90 @@ class InventoryConfig:
 
 
 @dataclass(frozen=True)
+class IncludeSetConfig:
+    name: str
+    paths: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.name, str)
+            or not self.name
+            or self.name != self.name.strip()
+        ):
+            raise ConfigError(
+                "include set name must be a non-empty trimmed string"
+            )
+
+        paths = tuple(self.paths)
+        object.__setattr__(self, "paths", paths)
+
+        if not paths:
+            raise ConfigError(
+                f"includeSets.{self.name} must contain at least one path"
+            )
+
+        for index, path in enumerate(paths):
+            if not isinstance(path, str):
+                raise ConfigError(
+                    f"includeSets.{self.name}[{index}] must be a string"
+                )
+
+            _validate_repo_relative_path(
+                path,
+                f"includeSets.{self.name}[{index}]",
+                allow_trailing_slash=False,
+            )
+
+
+@dataclass(frozen=True)
 class ConsultConfig:
     schema_version: int
     filters: FilterConfig
     inventory: InventoryConfig = field(default_factory=InventoryConfig)
+    include_sets: tuple[IncludeSetConfig, ...] = ()
+
+    def __post_init__(self) -> None:
+        include_sets = tuple(self.include_sets)
+        object.__setattr__(self, "include_sets", include_sets)
+
+        if not all(
+            isinstance(item, IncludeSetConfig)
+            for item in include_sets
+        ):
+            raise ConfigError(
+                "include_sets must contain only IncludeSetConfig values"
+            )
+
+        folded_names = tuple(
+            item.name.casefold() for item in include_sets
+        )
+
+        if len(folded_names) != len(set(folded_names)):
+            raise ConfigError(
+                "include_sets contains duplicate names"
+            )
+
+    def get_include_set(self, name: str) -> IncludeSetConfig:
+        if not isinstance(name, str) or not name or name != name.strip():
+            raise ConfigError(
+                "include set name must be a non-empty trimmed string"
+            )
+
+        folded_name = name.casefold()
+
+        for include_set in self.include_sets:
+            if include_set.name.casefold() == folded_name:
+                return include_set
+
+        known = ", ".join(
+            sorted(
+                (item.name for item in self.include_sets),
+                key=lambda value: (value.casefold(), value),
+            )
+        ) or "(none)"
+        raise ConfigError(
+            f"unknown include set: {name}; available: {known}"
+        )
 
 
 @dataclass(frozen=True)
@@ -250,13 +330,74 @@ def _parse_project_profile(
     )
 
 
+def _parse_include_sets(value: Any) -> tuple[IncludeSetConfig, ...]:
+    if value is None:
+        return ()
+
+    if not isinstance(value, dict):
+        raise ConfigError("includeSets must be an object")
+
+    include_sets: list[IncludeSetConfig] = []
+    seen_names: set[str] = set()
+
+    for raw_name, raw_paths in value.items():
+        if (
+            not isinstance(raw_name, str)
+            or not raw_name
+            or raw_name != raw_name.strip()
+        ):
+            raise ConfigError(
+                "includeSets names must be non-empty trimmed strings"
+            )
+
+        folded_name = raw_name.casefold()
+
+        if folded_name in seen_names:
+            raise ConfigError(
+                f"includeSets contains a duplicate name: {raw_name}"
+            )
+
+        seen_names.add(folded_name)
+        context = f"includeSets.{raw_name}"
+
+        if not isinstance(raw_paths, list):
+            raise ConfigError(f"{context} must be an array")
+
+        if not raw_paths:
+            raise ConfigError(f"{context} must contain at least one path")
+
+        paths: list[str] = []
+
+        for index, raw_path in enumerate(raw_paths):
+            item_context = f"{context}[{index}]"
+
+            if not isinstance(raw_path, str):
+                raise ConfigError(f"{item_context} must be a string")
+
+            _validate_repo_relative_path(
+                raw_path,
+                item_context,
+                allow_trailing_slash=False,
+            )
+            paths.append(raw_path)
+
+        include_sets.append(
+            IncludeSetConfig(
+                name=raw_name,
+                paths=tuple(paths),
+            )
+        )
+
+    return tuple(include_sets)
+
+
 def parse_config(payload: Any) -> ConsultConfig:
     if not isinstance(payload, dict):
         raise ConfigError("configuration root must be an object")
 
     _reject_unknown_keys(
         payload,
-        {"schemaVersion", "filters", "inventory"},
+        {"schemaVersion", "filters", "inventory", "includeSets"},
         "configuration",
     )
 
@@ -332,6 +473,7 @@ def parse_config(payload: Any) -> ConsultConfig:
         inventory=InventoryConfig(
             exclude_paths=inventory_exclude_paths,
         ),
+        include_sets=_parse_include_sets(payload.get("includeSets")),
     )
 
 
