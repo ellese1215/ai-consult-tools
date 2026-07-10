@@ -169,22 +169,37 @@ class PathFilter:
     def exclude_patterns(self) -> tuple[str, ...]:
         return self._exclude_patterns
 
+    def matching_pattern(
+        self,
+        relative_path: str | Path,
+        *,
+        is_dir: bool = False,
+    ) -> str | None:
+        del is_dir
+
+        normalized = normalize_relative_path(relative_path)
+
+        if not normalized:
+            return None
+
+        for pattern in self._exclude_patterns:
+            if _matches_pattern(normalized, pattern):
+                return pattern
+
+        return None
+
     def is_excluded(
         self,
         relative_path: str | Path,
         *,
         is_dir: bool = False,
     ) -> bool:
-        del is_dir
-
-        normalized = normalize_relative_path(relative_path)
-
-        if not normalized:
-            return False
-
-        return any(
-            _matches_pattern(normalized, pattern)
-            for pattern in self._exclude_patterns
+        return (
+            self.matching_pattern(
+                relative_path,
+                is_dir=is_dir,
+            )
+            is not None
         )
 
 
