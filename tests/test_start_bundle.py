@@ -14,7 +14,7 @@ SRC_ROOT = TOOL_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from ai_consult.bundle import BundleOrigin
+from ai_consult.bundle import BundleOrigin, ContentKind
 from ai_consult.collection import (
     CollectedTextFile,
     CollectionResult,
@@ -36,16 +36,29 @@ from ai_consult.inventory import (
     StructureIndexComparison,
 )
 from ai_consult.start_bundle import (
+    PATH_INDEX_PATH,
+    PROJECT_TREE_PATH,
+    REPO_OVERVIEW_PATH,
+    SKIPPED_PATH,
+    STRUCTURE_STATUS_PATH,
     StartBundleCollectionError,
+    StartBundleDocumentError,
     StartBundleStructureError,
+    StartCollectionSnapshot,
     StartFileRequest,
     StructureState,
+    build_generated_text_item,
     build_project_tree,
+    build_repo_overview,
     build_start_collection_snapshot,
     build_start_file_requests,
+    build_start_generated_items,
     build_structure_status,
     collect_start_files,
+    render_path_index,
     render_project_tree,
+    render_repo_overview,
+    render_skipped,
     render_structure_status,
     select_profile_entries,
 )
@@ -765,6 +778,260 @@ class StartFileCollectionTest(unittest.TestCase):
             relative_path=relative_path,
             file=collected,
         )
+
+
+class StartGeneratedDocumentTest(unittest.TestCase):
+    def test_repo_overview_is_minimal_and_deduplicates_placements(self) -> None:
+        project_tree = build_project_tree(
+            make_snapshot(
+                entry("apps/project", InventoryEntryType.DIRECTORY),
+                entry("apps/project/main.py"),
+                entry("common/project", InventoryEntryType.DIRECTORY),
+            ),
+            ProjectProfile(
+                name="project",
+                scope_roots=(
+                    "apps/project",
+                    "apps/project/shared",
+                    "common/project",
+                ),
+            ),
+        )
+
+        overview = build_repo_overview(project_tree)
+        rendered = render_repo_overview(overview)
+
+        self.assertEqual(
+            overview.top_level_placements,
+            ("apps", "common"),
+        )
+        self.assertIn("- Profile: `project`", rendered)
+        self.assertIn("- Profile entries: 3", rendered)
+        self.assertIn("- `apps/project/shared`", rendered)
+        self.assertEqual(rendered.count("- `apps`"), 1)
+        self.assertNotIn("/repo", rendered)
+        self.assertNotIn("Git", rendered)
+        self.assertNotIn("\r", rendered)
+        self.assertTrue(rendered.endswith("\n"))
+
+    def test_path_index_preserves_request_order_and_duplicate_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            target = repo / "project" / "a.md"
+            target.parent.mkdir()
+            target.write_text("alpha", encoding="utf-8")
+            snapshot = collect_start_files(
+                repo,
+                ConsultConfig(
+                    schema_version=1,
+                    filters=FilterConfig(),
+                    include_sets=(
+                        IncludeSetConfig(
+                            name="common",
+                            paths=(
+                                "project/a.md",
+                                "project/missing.md",
+                            ),
+                        ),
+                    ),
+                ),
+                ProjectProfile(
+                    name="project",
+                    scope_roots=("project",),
+                ),
+                include_set_names=("common",),
+                explicit_paths=("project/a.md",),
+            )
+
+        rendered = render_path_index(snapshot)
+
+        first = rendered.index("Requested: `project/a.md`")
+        second = rendered.index("Requested: `project/missing.md`")
+        third = rendered.rindex("Requested: `project/a.md`")
+        self.assertLess(first, second)
+        self.assertLess(second, third)
+        self.assertIn("Source: `include-set:common`", rendered)
+        self.assertIn("Source: `include-paths`", rendered)
+        self.assertIn("duplicate request", rendered)
+        self.assertIn("- Included files: 1", rendered)
+        self.assertIn("- Skipped requests: 1", rendered)
+        self.assertEqual(
+            rendered.count("- `project/a.md` (`include_set`)"),
+            1,
+        )
+        self.assertNotIn("\r", rendered)
+        self.assertTrue(rendered.endswith("\n"))
+
+    def test_skipped_renders_none_and_failure_details(self) -> None:
+        profile = ProjectProfile(
+            name="project",
+            scope_roots=("project",),
+        )
+        empty = build_start_collection_snapshot(profile, (), ())
+        self.assertIn("(none)\n", render_skipped(empty))
+
+        request = StartFileRequest(
+            requested_path="project/missing.md",
+            origin=BundleOrigin.INCLUDE_SET,
+            include_set_name="common",
+        )
+        failed = build_start_collection_snapshot(
+            profile,
+            (request,),
+            (
+                CollectionResult(
+                    requested_path=request.requested_path,
+                    status=CollectionStatus.MISSING,
+                    relative_path=request.requested_path,
+                    reason="file is missing\nfrom repository",
+                ),
+            ),
+        )
+        rendered = render_skipped(failed)
+
+        self.assertIn("- Count: 1", rendered)
+        self.assertIn("Status: `missing`", rendered)
+        self.assertIn("Source: `include-set:common`", rendered)
+        self.assertIn("Relative path: `project/missing.md`", rendered)
+        self.assertIn("file is missing from repository", rendered)
+        self.assertNotIn("file is missing\nfrom repository", rendered)
+
+    def test_generated_items_use_fixed_paths_and_utf8_metadata(self) -> None:
+        profile = ProjectProfile(
+            name="project",
+            scope_roots=("project",),
+        )
+        project_tree = build_project_tree(
+            make_snapshot(
+                entry("project", InventoryEntryType.DIRECTORY),
+                entry("project/main.py"),
+            ),
+            profile,
+        )
+        current_folder = folder_comparison(
+            current=True,
+            exists=True,
+            diff=StructureDiff(),
+        )
+        current_index = index_comparison(current=True, exists=True)
+        status = build_structure_status(
+            profile,
+            current_folder,
+            current_index,
+            folder_tree_updated=False,
+            structure_index_updated=False,
+            folder_tree_after=current_folder,
+            structure_index_after=current_index,
+        )
+        collection = build_start_collection_snapshot(profile, (), ())
+
+        items = build_start_generated_items(
+            project_tree,
+            status,
+            collection,
+        )
+
+        self.assertEqual(
+            tuple(item.relative_path for item in items),
+            (
+                REPO_OVERVIEW_PATH,
+                PROJECT_TREE_PATH,
+                STRUCTURE_STATUS_PATH,
+                PATH_INDEX_PATH,
+                SKIPPED_PATH,
+            ),
+        )
+        self.assertEqual(
+            tuple(item.content.splitlines()[0] for item in items),
+            (
+                "# REPO_OVERVIEW",
+                "# PROJECT_TREE",
+                "# STRUCTURE_STATUS",
+                "# PATH_INDEX",
+                "# SKIPPED",
+            ),
+        )
+
+        for item in items:
+            encoded = item.content.encode("utf-8")
+            self.assertIs(item.origin, BundleOrigin.GENERATED)
+            self.assertIs(item.content_kind, ContentKind.TEXT)
+            self.assertEqual(item.encoding, "utf-8")
+            self.assertEqual(item.source_bytes, len(encoded))
+            self.assertEqual(
+                item.source_sha256,
+                hashlib.sha256(encoded).hexdigest(),
+            )
+
+    def test_generated_items_require_matching_profiles(self) -> None:
+        project_tree = build_project_tree(
+            make_snapshot(),
+            ProjectProfile(name="one", scope_roots=("one",)),
+        )
+        other = ProjectProfile(name="two", scope_roots=("two",))
+        current_folder = folder_comparison(
+            current=True,
+            exists=True,
+            diff=StructureDiff(),
+        )
+        current_index = index_comparison(current=True, exists=True)
+        status = build_structure_status(
+            other,
+            current_folder,
+            current_index,
+            folder_tree_updated=False,
+            structure_index_updated=False,
+            folder_tree_after=current_folder,
+            structure_index_after=current_index,
+        )
+        collection = build_start_collection_snapshot(other, (), ())
+
+        with self.assertRaisesRegex(
+            StartBundleDocumentError,
+            "matching profile names",
+        ):
+            build_start_generated_items(
+                project_tree,
+                status,
+                collection,
+            )
+
+    def test_generated_text_item_validates_input(self) -> None:
+        with self.assertRaises(StartBundleDocumentError):
+            build_generated_text_item("../PATH_INDEX.md", "content")
+
+        with self.assertRaises(StartBundleDocumentError):
+            build_generated_text_item(
+                PATH_INDEX_PATH,
+                b"content",  # type: ignore[arg-type]
+            )
+
+    def test_snapshot_requires_profile_and_matching_skipped_records(self) -> None:
+        with self.assertRaises(StartBundleCollectionError):
+            StartCollectionSnapshot(profile_name="")
+
+        request = StartFileRequest(
+            requested_path="project/missing.md",
+            origin=BundleOrigin.EXPLICIT,
+        )
+        resolution = CollectionResult(
+            requested_path=request.requested_path,
+            status=CollectionStatus.MISSING,
+            reason="missing",
+        )
+        snapshot = build_start_collection_snapshot(
+            ProjectProfile(name="project", scope_roots=("project",)),
+            (request,),
+            (resolution,),
+        )
+
+        with self.assertRaises(StartBundleCollectionError):
+            StartCollectionSnapshot(
+                profile_name="project",
+                requests=snapshot.requests,
+                path_resolutions=snapshot.path_resolutions,
+                skipped_items=(),
+            )
 
 
 if __name__ == "__main__":

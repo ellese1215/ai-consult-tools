@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
@@ -38,6 +39,24 @@ class StartBundleStructureError(ValueError):
     pass
 
 
+class StartBundleDocumentError(ValueError):
+    pass
+
+
+REPO_OVERVIEW_PATH = "REPO_OVERVIEW.md"
+PROJECT_TREE_PATH = "PROJECT_TREE.md"
+STRUCTURE_STATUS_PATH = "STRUCTURE_STATUS.md"
+PATH_INDEX_PATH = "PATH_INDEX.md"
+SKIPPED_PATH = "SKIPPED.md"
+_START_GENERATED_PATHS = (
+    REPO_OVERVIEW_PATH,
+    PROJECT_TREE_PATH,
+    STRUCTURE_STATUS_PATH,
+    PATH_INDEX_PATH,
+    SKIPPED_PATH,
+)
+
+
 class StructureState(str, Enum):
     CURRENT = "current"
     MISSING = "missing"
@@ -70,6 +89,51 @@ class ProjectTree:
         if not all(isinstance(entry, InventoryEntry) for entry in entries):
             raise StartBundleStructureError(
                 "entries must contain only InventoryEntry values"
+            )
+
+
+@dataclass(frozen=True)
+class RepoOverview:
+    profile_name: str
+    scope_roots: tuple[str, ...]
+    top_level_placements: tuple[str, ...]
+    profile_entry_count: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.profile_name, str) or not self.profile_name:
+            raise StartBundleDocumentError(
+                "profile_name must be a non-empty string"
+            )
+
+        scope_roots = tuple(self.scope_roots)
+        placements = tuple(self.top_level_placements)
+        object.__setattr__(self, "scope_roots", scope_roots)
+        object.__setattr__(self, "top_level_placements", placements)
+
+        if not all(isinstance(root, str) and root for root in scope_roots):
+            raise StartBundleDocumentError(
+                "scope_roots must contain only non-empty strings"
+            )
+
+        if not all(
+            isinstance(value, str) and value for value in placements
+        ):
+            raise StartBundleDocumentError(
+                "top_level_placements must contain only non-empty strings"
+            )
+
+        folded = tuple(value.casefold() for value in placements)
+        if len(folded) != len(set(folded)):
+            raise StartBundleDocumentError(
+                "top_level_placements must not contain duplicates"
+            )
+
+        if (
+            type(self.profile_entry_count) is not int
+            or self.profile_entry_count < 0
+        ):
+            raise StartBundleDocumentError(
+                "profile_entry_count must be a non-negative integer"
             )
 
 
@@ -260,6 +324,58 @@ def render_project_tree(project_tree: ProjectTree) -> str:
         lines.extend(f"    {line}" for line in tree_lines)
     else:
         lines.append("    (empty)")
+
+    return "\n".join(lines) + "\n"
+
+
+def build_repo_overview(project_tree: ProjectTree) -> RepoOverview:
+    _require_type(project_tree, ProjectTree, "project_tree")
+    placements: list[str] = []
+    seen: set[str] = set()
+
+    for scope_root in project_tree.scope_roots:
+        top_level = PurePosixPath(scope_root).parts[0]
+        folded = top_level.casefold()
+
+        if folded in seen:
+            continue
+
+        seen.add(folded)
+        placements.append(top_level)
+
+    return RepoOverview(
+        profile_name=project_tree.profile_name,
+        scope_roots=project_tree.scope_roots,
+        top_level_placements=tuple(placements),
+        profile_entry_count=len(project_tree.entries),
+    )
+
+
+def render_repo_overview(overview: RepoOverview) -> str:
+    _require_type(overview, RepoOverview, "overview")
+    lines = [
+        "# REPO_OVERVIEW",
+        "",
+        f"- Profile: `{overview.profile_name}`",
+        f"- Profile entries: {overview.profile_entry_count}",
+        "",
+        "## Scope Roots",
+        "",
+    ]
+    lines.extend(
+        (f"- `{root}`" for root in overview.scope_roots),
+    )
+
+    if not overview.scope_roots:
+        lines.append("- (none)")
+
+    lines.extend(["", "## Top-level Placements", ""])
+    lines.extend(
+        (f"- `{value}`" for value in overview.top_level_placements),
+    )
+
+    if not overview.top_level_placements:
+        lines.append("- (none)")
 
     return "\n".join(lines) + "\n"
 
@@ -561,6 +677,7 @@ def _render_path_list(paths: tuple[str, ...]) -> list[str]:
 def _escape_table_cell(value: str) -> str:
     return value.replace("\r", " ").replace("\n", " ").replace("|", "\\|")
 
+
 class StartBundleCollectionError(ValueError):
     pass
 
@@ -610,12 +727,22 @@ class StartFileRequest:
 
 @dataclass(frozen=True)
 class StartCollectionSnapshot:
+    profile_name: str
     requests: tuple[StartFileRequest, ...] = ()
     items: tuple[BundleItem, ...] = ()
     path_resolutions: tuple[PathResolution, ...] = ()
     skipped_items: tuple[SkippedItem, ...] = ()
 
     def __post_init__(self) -> None:
+        if (
+            not isinstance(self.profile_name, str)
+            or not self.profile_name
+            or self.profile_name != self.profile_name.strip()
+        ):
+            raise StartBundleCollectionError(
+                "profile_name must be a non-empty trimmed string"
+            )
+
         requests = tuple(self.requests)
         items = tuple(self.items)
         resolutions = tuple(self.path_resolutions)
@@ -659,6 +786,36 @@ class StartCollectionSnapshot:
             if request.origin is not resolution.origin:
                 raise StartBundleCollectionError(
                     "request and path resolution origins must match"
+                )
+
+        failed_pairs = tuple(
+            (request, resolution)
+            for request, resolution in zip(
+                requests,
+                resolutions,
+                strict=True,
+            )
+            if resolution.status is not CollectionStatus.INCLUDED
+        )
+
+        if len(failed_pairs) != len(skipped_items):
+            raise StartBundleCollectionError(
+                "each failed start request requires one skipped item"
+            )
+
+        for (request, resolution), skipped in zip(
+            failed_pairs,
+            skipped_items,
+            strict=True,
+        ):
+            if (
+                skipped.requested_path != request.requested_path
+                or skipped.status is not resolution.status
+                or skipped.origin is not request.origin
+                or skipped.reason != resolution.reason
+            ):
+                raise StartBundleCollectionError(
+                    "failed request, resolution, and skipped item must match"
                 )
 
         seen_items: set[str] = set()
@@ -947,11 +1104,193 @@ def build_start_collection_snapshot(
         )
 
     return StartCollectionSnapshot(
+        profile_name=profile.name,
         requests=request_values,
         items=tuple(items),
         path_resolutions=tuple(resolutions),
         skipped_items=tuple(skipped_items),
     )
+
+
+def render_path_index(snapshot: StartCollectionSnapshot) -> str:
+    _require_type(snapshot, StartCollectionSnapshot, "snapshot")
+    lines = [
+        "# PATH_INDEX",
+        "",
+        f"- Profile: `{snapshot.profile_name}`",
+        f"- Requests: {len(snapshot.requests)}",
+        f"- Included files: {len(snapshot.items)}",
+        f"- Skipped requests: {len(snapshot.skipped_items)}",
+        "",
+        "## Resolution Results",
+        "",
+    ]
+
+    if not snapshot.requests:
+        lines.append("- (none)")
+    else:
+        for index, (request, resolution) in enumerate(
+            zip(
+                snapshot.requests,
+                snapshot.path_resolutions,
+                strict=True,
+            ),
+            start=1,
+        ):
+            lines.extend(
+                [
+                    f"{index}. Status: `{resolution.status.value}`",
+                    f"   - Source: `{request.source_label}`",
+                    f"   - Requested: `{request.requested_path}`",
+                ]
+            )
+
+            if resolution.resolved_paths:
+                lines.append("   - Resolved:")
+                lines.extend(
+                    f"     - `{path}`"
+                    for path in resolution.resolved_paths
+                )
+            else:
+                lines.append("   - Resolved: (none)")
+
+            if resolution.reason is not None:
+                lines.append(
+                    "   - Reason: " + _inline_text(resolution.reason)
+                )
+
+    lines.extend(["", "## Included Paths", ""])
+
+    if snapshot.items:
+        lines.extend(
+            f"- `{item.relative_path}` (`{item.origin.value}`)"
+            for item in snapshot.items
+        )
+    else:
+        lines.append("- (none)")
+
+    return "\n".join(lines) + "\n"
+
+
+def render_skipped(snapshot: StartCollectionSnapshot) -> str:
+    _require_type(snapshot, StartCollectionSnapshot, "snapshot")
+    lines = [
+        "# SKIPPED",
+        "",
+        f"- Profile: `{snapshot.profile_name}`",
+        f"- Count: {len(snapshot.skipped_items)}",
+        "",
+    ]
+
+    if not snapshot.skipped_items:
+        lines.append("(none)")
+        return "\n".join(lines) + "\n"
+
+    skipped_index = 0
+
+    for request, resolution in zip(
+        snapshot.requests,
+        snapshot.path_resolutions,
+        strict=True,
+    ):
+        if resolution.status is CollectionStatus.INCLUDED:
+            continue
+
+        skipped = snapshot.skipped_items[skipped_index]
+        skipped_index += 1
+        lines.extend(
+            [
+                f"{skipped_index}. Status: `{skipped.status.value}`",
+                f"   - Source: `{request.source_label}`",
+                f"   - Requested: `{skipped.requested_path}`",
+            ]
+        )
+
+        if skipped.relative_path is not None:
+            lines.append(
+                f"   - Relative path: `{skipped.relative_path}`"
+            )
+
+        lines.append("   - Reason: " + _inline_text(skipped.reason))
+
+    return "\n".join(lines) + "\n"
+
+
+def build_generated_text_item(
+    relative_path: str,
+    content: str,
+) -> BundleItem:
+    _validate_generated_relative_path(relative_path)
+
+    if not isinstance(content, str):
+        raise StartBundleDocumentError("content must be a string")
+
+    encoded = content.encode("utf-8")
+    return BundleItem(
+        relative_path=relative_path,
+        content_kind=ContentKind.TEXT,
+        origin=BundleOrigin.GENERATED,
+        content=content,
+        encoding="utf-8",
+        source_bytes=len(encoded),
+        source_sha256=hashlib.sha256(encoded).hexdigest(),
+    )
+
+
+def build_start_generated_items(
+    project_tree: ProjectTree,
+    structure_status: ProjectStructureStatus,
+    collection_snapshot: StartCollectionSnapshot,
+) -> tuple[BundleItem, ...]:
+    _require_type(project_tree, ProjectTree, "project_tree")
+    _require_type(
+        structure_status,
+        ProjectStructureStatus,
+        "structure_status",
+    )
+    _require_type(
+        collection_snapshot,
+        StartCollectionSnapshot,
+        "collection_snapshot",
+    )
+
+    profile_names = {
+        project_tree.profile_name,
+        structure_status.profile_name,
+        collection_snapshot.profile_name,
+    }
+
+    if len(profile_names) != 1:
+        raise StartBundleDocumentError(
+            "generated start documents require matching profile names"
+        )
+
+    contents = (
+        render_repo_overview(build_repo_overview(project_tree)),
+        render_project_tree(project_tree),
+        render_structure_status(structure_status),
+        render_path_index(collection_snapshot),
+        render_skipped(collection_snapshot),
+    )
+    return tuple(
+        build_generated_text_item(path, content)
+        for path, content in zip(
+            _START_GENERATED_PATHS,
+            contents,
+            strict=True,
+        )
+    )
+
+
+def _inline_text(value: str) -> str:
+    return " ".join(value.replace("|", "\\|").splitlines()).strip()
+
+
+def _validate_generated_relative_path(value: str) -> None:
+    try:
+        _validate_start_relative_path(value, "relative_path")
+    except StartBundleCollectionError as exc:
+        raise StartBundleDocumentError(str(exc)) from exc
 
 
 def _normalize_start_strings(
