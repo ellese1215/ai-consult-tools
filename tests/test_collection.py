@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import io
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 
@@ -35,6 +37,33 @@ def make_config(
             max_text_bytes=max_text_bytes,
         ),
     )
+
+
+def make_xlsx_bytes() -> bytes:
+    buffer = io.BytesIO()
+
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(
+            "xl/workbook.xml",
+            """<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="ER" sheetId="1" r:id="rId1"/></sheets>
+</workbook>""",
+        )
+        archive.writestr(
+            "xl/_rels/workbook.xml.rels",
+            """<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Target="worksheets/sheet1.xml"/>
+</Relationships>""",
+        )
+        archive.writestr(
+            "xl/worksheets/sheet1.xml",
+            """<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>users</t></is></c></row></sheetData>
+</worksheet>""",
+        )
+
+    return buffer.getvalue()
 
 
 class ExplicitFileCollectorTest(unittest.TestCase):
@@ -209,6 +238,30 @@ class ExplicitFileCollectorTest(unittest.TestCase):
                 result.status,
                 CollectionStatus.BINARY,
             )
+
+    def test_xlsx_file_is_included_as_extracted_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            target = repo / "schema.xlsx"
+            target.write_bytes(make_xlsx_bytes())
+
+            collector = ExplicitFileCollector.from_config(
+                repo,
+                make_config(),
+            )
+            result = collector.collect_one("schema.xlsx")
+
+            self.assertEqual(
+                result.status,
+                CollectionStatus.INCLUDED,
+            )
+            self.assertIsNotNone(result.file)
+
+            assert result.file is not None
+
+            self.assertEqual(result.file.encoding, "xlsx-xml")
+            self.assertIn("## Sheet: ER", result.file.text)
+            self.assertIn("A1: users", result.file.text)
 
     def test_large_file_is_reported_without_truncation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

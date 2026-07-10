@@ -13,7 +13,12 @@ SRC_ROOT = TOOL_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from ai_consult.config import ConfigError, load_config, parse_config
+from ai_consult.config import (
+    DEFAULT_INVENTORY_EXCLUDE_PATHS,
+    ConfigError,
+    load_config,
+    parse_config,
+)
 
 
 class ConfigTest(unittest.TestCase):
@@ -25,6 +30,9 @@ class ConfigTest(unittest.TestCase):
                     "excludePaths": [".git", "vendor/"],
                     "binaryExtensions": [".psd"],
                     "maxTextBytes": 12345,
+                },
+                "inventory": {
+                    "excludePaths": ["private/generated/"],
                 },
             }
         )
@@ -39,6 +47,47 @@ class ConfigTest(unittest.TestCase):
             (".psd",),
         )
         self.assertEqual(config.filters.max_text_bytes, 12345)
+        self.assertEqual(
+            config.inventory.exclude_paths[: len(DEFAULT_INVENTORY_EXCLUDE_PATHS)],
+            DEFAULT_INVENTORY_EXCLUDE_PATHS,
+        )
+        self.assertEqual(
+            config.inventory.exclude_paths[-1],
+            "private/generated/",
+        )
+
+    def test_inventory_defaults_are_applied_without_section(self) -> None:
+        config = parse_config(
+            {
+                "schemaVersion": 1,
+                "filters": {},
+            }
+        )
+
+        self.assertEqual(
+            config.inventory.exclude_paths,
+            DEFAULT_INVENTORY_EXCLUDE_PATHS,
+        )
+
+    def test_inventory_duplicate_default_is_not_added_twice(self) -> None:
+        config = parse_config(
+            {
+                "schemaVersion": 1,
+                "filters": {},
+                "inventory": {
+                    "excludePaths": [".GIT"],
+                },
+            }
+        )
+
+        self.assertEqual(
+            sum(
+                1
+                for value in config.inventory.exclude_paths
+                if value.casefold() == ".git"
+            ),
+            1,
+        )
 
     def test_rejects_unsupported_schema(self) -> None:
         with self.assertRaises(ConfigError):
@@ -50,6 +99,17 @@ class ConfigTest(unittest.TestCase):
                 {
                     "schemaVersion": 1,
                     "unexpected": True,
+                }
+            )
+
+    def test_rejects_unknown_inventory_key(self) -> None:
+        with self.assertRaises(ConfigError):
+            parse_config(
+                {
+                    "schemaVersion": 1,
+                    "inventory": {
+                        "unexpected": True,
+                    },
                 }
             )
 

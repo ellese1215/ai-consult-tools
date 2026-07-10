@@ -15,5 +15,8 @@
       ".clip"
     ],
     "maxTextBytes": 2000000
+  },
+  "inventory": {
+    "excludePaths": []
   }
 }

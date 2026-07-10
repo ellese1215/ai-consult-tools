@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import io
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 
@@ -21,6 +23,64 @@ from ai_consult.filters import (
     normalize_relative_path,
     read_text_file,
 )
+
+
+def make_xlsx_bytes() -> bytes:
+    buffer = io.BytesIO()
+
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(
+            "xl/workbook.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="ER" sheetId="1" r:id="rId1"/></sheets>
+</workbook>""",
+        )
+        archive.writestr(
+            "xl/_rels/workbook.xml.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Target="worksheets/sheet1.xml"/>
+</Relationships>""",
+        )
+        archive.writestr(
+            "xl/sharedStrings.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <si><t>users</t></si>
+</sst>""",
+        )
+        archive.writestr(
+            "xl/worksheets/sheet1.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>
+    <row r="1"><c r="A1" t="s"><v>0</v></c></row>
+    <row r="2"><c r="B2"><f>1+2</f><v>3</v></c></row>
+    <row r="3"><c r="C3" t="inlineStr"><is><t>primary key</t></is></c></row>
+  </sheetData>
+  <drawing r:id="rIdDrawing"/>
+</worksheet>""",
+        )
+        archive.writestr(
+            "xl/worksheets/_rels/sheet1.xml.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdDrawing" Target="../drawings/drawing1.xml"/>
+</Relationships>""",
+        )
+        archive.writestr(
+            "xl/drawings/drawing1.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+ xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <xdr:sp><xdr:txBody><a:p><a:r><a:t>orders</a:t></a:r></a:p></xdr:txBody></xdr:sp>
+</xdr:wsDr>""",
+        )
+
+    return buffer.getvalue()
 
 
 class PathFilterTest(unittest.TestCase):
@@ -152,6 +212,28 @@ class TextFilterTest(unittest.TestCase):
                 b"plain text",
                 path="drawing.clip",
                 binary_extensions=[".clip"],
+            )
+
+    def test_xlsx_is_extracted_as_deterministic_text(self) -> None:
+        result = decode_text_bytes(
+            make_xlsx_bytes(),
+            path="schema.xlsx",
+        )
+
+        self.assertEqual(result.encoding, "xlsx-xml")
+        self.assertIn("# XLSX: schema.xlsx", result.text)
+        self.assertIn("## Sheet: ER", result.text)
+        self.assertIn("A1: users", result.text)
+        self.assertIn("B2: =1+2 => 3", result.text)
+        self.assertIn("C3: primary key", result.text)
+        self.assertIn("### Drawing text", result.text)
+        self.assertIn("- orders", result.text)
+
+    def test_invalid_xlsx_is_decode_error(self) -> None:
+        with self.assertRaises(TextDecodeError):
+            decode_text_bytes(
+                b"not an xlsx",
+                path="schema.xlsx",
             )
 
     def test_large_text_file_is_not_truncated(self) -> None:

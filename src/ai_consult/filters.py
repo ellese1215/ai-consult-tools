@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import fnmatch
+import io
 import posixpath
 import re
+import zipfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Iterable
+from xml.etree import ElementTree
 
 
 BUILTIN_BINARY_EXTENSIONS = frozenset(
@@ -48,12 +51,20 @@ BUILTIN_BINARY_EXTENSIONS = frozenset(
         ".woff",
         ".woff2",
         ".xls",
-        ".xlsx",
         ".zip",
     }
 )
 
 _DRIVE_PATTERN = re.compile(r"^[A-Za-z]:/")
+_XLSX_EXTENSION = ".xlsx"
+_XLSX_MAX_XML_BYTES = 64_000_000
+_XLSX_MAX_OUTPUT_CHARACTERS = 2_000_000
+_XLSX_MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+_XLSX_REL_NS = (
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+)
+_PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+_DRAWING_MAIN_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 
 
 class FilterError(ValueError):
@@ -273,6 +284,299 @@ def _has_excessive_control_bytes(data: bytes) -> bool:
     return controls / len(data) > 0.05
 
 
+def _xlsx_xml_text(element: ElementTree.Element) -> str:
+    values = [
+        node.text or ""
+        for node in element.iter()
+        if node.tag == f"{{{_XLSX_MAIN_NS}}}t"
+        or node.tag == f"{{{_DRAWING_MAIN_NS}}}t"
+    ]
+    return "".join(values)
+
+
+def _xlsx_clean_value(value: str) -> str:
+    return (
+        value.replace("\r\n", "\\n")
+        .replace("\r", "\\n")
+        .replace("\n", "\\n")
+        .replace("\t", "\\t")
+    )
+
+
+def _xlsx_resolve_target(source_path: str, target: str) -> str:
+    if target.startswith("/"):
+        return target.lstrip("/")
+
+    source_parent = PurePosixPath(source_path).parent
+    return posixpath.normpath(
+        posixpath.join(source_parent.as_posix(), target)
+    )
+
+
+def _xlsx_relationships(
+    archive: zipfile.ZipFile,
+    relationships_path: str,
+    source_path: str,
+) -> dict[str, str]:
+    try:
+        data = archive.read(relationships_path)
+    except KeyError:
+        return {}
+
+    try:
+        root = ElementTree.fromstring(data)
+    except ElementTree.ParseError as exc:
+        raise TextDecodeError(
+            f"invalid XLSX relationships XML: {relationships_path}"
+        ) from exc
+
+    result: dict[str, str] = {}
+
+    for relationship in root.findall(
+        f"{{{_PACKAGE_REL_NS}}}Relationship"
+    ):
+        relationship_id = relationship.get("Id")
+        target = relationship.get("Target")
+
+        if relationship_id and target:
+            result[relationship_id] = _xlsx_resolve_target(
+                source_path,
+                target,
+            )
+
+    return result
+
+
+def _xlsx_shared_strings(
+    archive: zipfile.ZipFile,
+) -> tuple[str, ...]:
+    try:
+        data = archive.read("xl/sharedStrings.xml")
+    except KeyError:
+        return ()
+
+    try:
+        root = ElementTree.fromstring(data)
+    except ElementTree.ParseError as exc:
+        raise TextDecodeError("invalid XLSX shared strings XML") from exc
+
+    return tuple(
+        _xlsx_xml_text(item)
+        for item in root.findall(f"{{{_XLSX_MAIN_NS}}}si")
+    )
+
+
+def _xlsx_cell_value(
+    cell: ElementTree.Element,
+    shared_strings: tuple[str, ...],
+) -> str:
+    cell_type = cell.get("t", "")
+    formula_node = cell.find(f"{{{_XLSX_MAIN_NS}}}f")
+    value_node = cell.find(f"{{{_XLSX_MAIN_NS}}}v")
+    inline_node = cell.find(f"{{{_XLSX_MAIN_NS}}}is")
+    raw_value = value_node.text if value_node is not None else ""
+
+    if cell_type == "s" and raw_value:
+        try:
+            value = shared_strings[int(raw_value)]
+        except (ValueError, IndexError) as exc:
+            raise TextDecodeError(
+                f"invalid XLSX shared string index: {raw_value}"
+            ) from exc
+    elif cell_type == "inlineStr" and inline_node is not None:
+        value = _xlsx_xml_text(inline_node)
+    elif cell_type == "b":
+        value = "TRUE" if raw_value == "1" else "FALSE"
+    else:
+        value = raw_value
+
+    formula = formula_node.text if formula_node is not None else ""
+
+    if formula:
+        formula_text = "=" + formula
+
+        if value:
+            return f"{formula_text} => {value}"
+
+        return formula_text
+
+    return value
+
+
+def _xlsx_drawing_text(
+    archive: zipfile.ZipFile,
+    worksheet_path: str,
+    worksheet_root: ElementTree.Element,
+) -> tuple[str, ...]:
+    worksheet_name = PurePosixPath(worksheet_path).name
+    relationships_path = (
+        PurePosixPath(worksheet_path).parent
+        / "_rels"
+        / f"{worksheet_name}.rels"
+    ).as_posix()
+    relationships = _xlsx_relationships(
+        archive,
+        relationships_path,
+        worksheet_path,
+    )
+    result: list[str] = []
+
+    for drawing in worksheet_root.findall(
+        f"{{{_XLSX_MAIN_NS}}}drawing"
+    ):
+        relationship_id = drawing.get(f"{{{_XLSX_REL_NS}}}id")
+
+        if not relationship_id:
+            continue
+
+        drawing_path = relationships.get(relationship_id)
+
+        if not drawing_path:
+            continue
+
+        try:
+            drawing_data = archive.read(drawing_path)
+        except KeyError:
+            continue
+
+        try:
+            drawing_root = ElementTree.fromstring(drawing_data)
+        except ElementTree.ParseError as exc:
+            raise TextDecodeError(
+                f"invalid XLSX drawing XML: {drawing_path}"
+            ) from exc
+
+        for text_node in drawing_root.iter(
+            f"{{{_DRAWING_MAIN_NS}}}t"
+        ):
+            text = (text_node.text or "").strip()
+
+            if text:
+                result.append(text)
+
+    return tuple(result)
+
+
+def _decode_xlsx_bytes(
+    data: bytes,
+    path: str | Path | None,
+) -> DecodedText:
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile as exc:
+        raise TextDecodeError("invalid XLSX ZIP container") from exc
+
+    with archive:
+        xml_size = sum(
+            item.file_size
+            for item in archive.infolist()
+            if item.filename.endswith(".xml")
+            or item.filename.endswith(".rels")
+        )
+
+        if xml_size > _XLSX_MAX_XML_BYTES:
+            raise TextFileTooLargeError(
+                "XLSX XML content exceeds safe extraction limit: "
+                f"{xml_size} bytes > {_XLSX_MAX_XML_BYTES} bytes"
+            )
+
+        try:
+            workbook_data = archive.read("xl/workbook.xml")
+        except KeyError as exc:
+            raise TextDecodeError(
+                "invalid XLSX workbook: xl/workbook.xml is missing"
+            ) from exc
+
+        try:
+            workbook_root = ElementTree.fromstring(workbook_data)
+        except ElementTree.ParseError as exc:
+            raise TextDecodeError("invalid XLSX workbook XML") from exc
+
+        workbook_relationships = _xlsx_relationships(
+            archive,
+            "xl/_rels/workbook.xml.rels",
+            "xl/workbook.xml",
+        )
+        shared_strings = _xlsx_shared_strings(archive)
+        workbook_name = Path(path).name if path is not None else "workbook.xlsx"
+        lines = [f"# XLSX: {workbook_name}"]
+
+        sheets_parent = workbook_root.find(
+            f"{{{_XLSX_MAIN_NS}}}sheets"
+        )
+
+        if sheets_parent is None:
+            raise TextDecodeError("invalid XLSX workbook: sheets are missing")
+
+        for sheet in sheets_parent.findall(f"{{{_XLSX_MAIN_NS}}}sheet"):
+            sheet_name = sheet.get("name", "(unnamed)")
+            relationship_id = sheet.get(f"{{{_XLSX_REL_NS}}}id")
+
+            if not relationship_id:
+                continue
+
+            worksheet_path = workbook_relationships.get(relationship_id)
+
+            if not worksheet_path:
+                continue
+
+            try:
+                worksheet_data = archive.read(worksheet_path)
+            except KeyError as exc:
+                raise TextDecodeError(
+                    f"XLSX worksheet is missing: {worksheet_path}"
+                ) from exc
+
+            try:
+                worksheet_root = ElementTree.fromstring(worksheet_data)
+            except ElementTree.ParseError as exc:
+                raise TextDecodeError(
+                    f"invalid XLSX worksheet XML: {worksheet_path}"
+                ) from exc
+
+            lines.extend(("", f"## Sheet: {sheet_name}"))
+            cell_count = 0
+
+            for cell in worksheet_root.iter(f"{{{_XLSX_MAIN_NS}}}c"):
+                cell_reference = cell.get("r", "(unknown)")
+                value = _xlsx_cell_value(cell, shared_strings)
+
+                if not value:
+                    continue
+
+                lines.append(
+                    f"{cell_reference}: {_xlsx_clean_value(value)}"
+                )
+                cell_count += 1
+
+            drawing_text = _xlsx_drawing_text(
+                archive,
+                worksheet_path,
+                worksheet_root,
+            )
+
+            if drawing_text:
+                lines.extend(("", "### Drawing text"))
+                lines.extend(
+                    f"- {_xlsx_clean_value(value)}"
+                    for value in drawing_text
+                )
+
+            if cell_count == 0 and not drawing_text:
+                lines.append("(no readable cell or drawing text)")
+
+        text = "\n".join(lines) + "\n"
+
+        if len(text) > _XLSX_MAX_OUTPUT_CHARACTERS:
+            raise TextFileTooLargeError(
+                "XLSX extracted text exceeds limit: "
+                f"{len(text)} characters > "
+                f"{_XLSX_MAX_OUTPUT_CHARACTERS} characters"
+            )
+
+        return DecodedText(text=text, encoding="xlsx-xml")
+
+
 def decode_text_bytes(
     data: bytes,
     *,
@@ -283,6 +587,9 @@ def decode_text_bytes(
         raise BinaryFileError(
             f"binary extension is not eligible for text inclusion: {path}"
         )
+
+    if path is not None and Path(path).suffix.casefold() == _XLSX_EXTENSION:
+        return _decode_xlsx_bytes(data, path)
 
     if data.startswith(b"\xef\xbb\xbf"):
         try:
