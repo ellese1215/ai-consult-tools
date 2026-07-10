@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "filters": {
+    "excludePaths": [
+      ".git",
+      "node_modules",
+      "vendor",
+      "ai-consult-tools/archive/",
+      "ai-consult-tools/chatgpt/consult_case/",
+      "ai-consult-tools/claude/consult_case/",
+      "ai-consult-tools/local/"
+    ],
+    "binaryExtensions": [
+      ".psd",
+      ".clip"
+    ],
+    "maxTextBytes": 2000000
+  }
+}

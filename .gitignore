@@ -24,3 +24,7 @@ consult_case/
 consult_project/
 
 # END ai-consult-tools generated/local artifacts
+
+# Python runtime artifacts
+__pycache__/
+*.py[cod]
