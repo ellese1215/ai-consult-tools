@@ -14,7 +14,7 @@ SRC_ROOT = TOOL_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from ai_consult.cli import EXIT_ERROR, EXIT_STALE, main
+from ai_consult.cli import EXIT_ERROR, EXIT_NO_MATCH, EXIT_STALE, main
 
 
 class StructureCliTest(unittest.TestCase):
@@ -246,6 +246,196 @@ class StructureCliTest(unittest.TestCase):
         self.assertIn("structure index: stale", output)
         self.assertEqual(error, "")
         self.assertFalse(cache_exists)
+
+    def test_find_uses_current_index_and_deterministic_ranking(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "docs").mkdir()
+            (repo / "archive" / "guide").mkdir(parents=True)
+            (repo / "guide.md").write_text("root", encoding="utf-8")
+            (repo / "docs" / "guide.md").write_text(
+                "docs",
+                encoding="utf-8",
+            )
+            (repo / "docs" / "guide-notes.md").write_text(
+                "notes",
+                encoding="utf-8",
+            )
+            (repo / "archive" / "guide" / "source.txt").write_text(
+                "source",
+                encoding="utf-8",
+            )
+            self.run_cli(
+                "structure",
+                "sync",
+                "--repo-root",
+                str(repo),
+            )
+
+            exit_code, output, error = self.run_cli(
+                "find",
+                "GUIDE.MD",
+                "--repo-root",
+                str(repo),
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(error, "")
+        self.assertIn("find: 2 matches", output)
+        self.assertIn("query: GUIDE.MD", output)
+        self.assertIn("profile: (all)", output)
+        self.assertLess(
+            output.index("  [file] guide.md"),
+            output.index("  [file] docs/guide.md"),
+        )
+        self.assertNotIn("guide-notes.md", output)
+
+    def test_find_returns_no_match_without_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "one.txt").write_text("one", encoding="utf-8")
+            self.run_cli(
+                "structure",
+                "sync",
+                "--repo-root",
+                str(repo),
+            )
+
+            exit_code, output, error = self.run_cli(
+                "find",
+                "missing",
+                "--repo-root",
+                str(repo),
+            )
+
+        self.assertEqual(exit_code, EXIT_NO_MATCH)
+        self.assertIn("find: no matches", output)
+        self.assertEqual(error, "")
+
+    def test_find_rejects_stale_index_without_modifying_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "one.txt").write_text("one", encoding="utf-8")
+            self.run_cli(
+                "structure",
+                "sync",
+                "--repo-root",
+                str(repo),
+            )
+            index_path = (
+                repo
+                / "ai-consult-tools"
+                / "local"
+                / "cache"
+                / "repo_structure_index.json"
+            )
+            previous = index_path.read_bytes()
+            (repo / "two.txt").write_text("two", encoding="utf-8")
+
+            exit_code, output, error = self.run_cli(
+                "find",
+                "one.txt",
+                "--repo-root",
+                str(repo),
+            )
+            after = index_path.read_bytes()
+
+        self.assertEqual(exit_code, EXIT_ERROR)
+        self.assertEqual(output, "")
+        self.assertIn("structure index is stale", error)
+        self.assertIn("structure sync", error)
+        self.assertEqual(after, previous)
+
+    def test_find_rejects_missing_index_without_recreating_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "one.txt").write_text("one", encoding="utf-8")
+            self.run_cli(
+                "structure",
+                "sync",
+                "--repo-root",
+                str(repo),
+            )
+            index_path = (
+                repo
+                / "ai-consult-tools"
+                / "local"
+                / "cache"
+                / "repo_structure_index.json"
+            )
+            index_path.unlink()
+
+            exit_code, output, error = self.run_cli(
+                "find",
+                "one.txt",
+                "--repo-root",
+                str(repo),
+            )
+            index_exists = index_path.exists()
+
+        self.assertEqual(exit_code, EXIT_ERROR)
+        self.assertEqual(output, "")
+        self.assertIn("structure index is missing", error)
+        self.assertFalse(index_exists)
+
+    def test_find_filters_by_local_project_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "apps" / "alpha").mkdir(parents=True)
+            (repo / "apps" / "beta").mkdir(parents=True)
+            (repo / "apps" / "alpha" / "readme.md").write_text(
+                "alpha",
+                encoding="utf-8",
+            )
+            (repo / "apps" / "beta" / "readme.md").write_text(
+                "beta",
+                encoding="utf-8",
+            )
+            local = repo / "ai-consult-tools" / "local"
+            local.mkdir(parents=True)
+            (local / "project_profiles.json").write_text(
+                """{
+  "schemaVersion": 1,
+  "profiles": {
+    "alpha": {
+      "scopeRoots": ["apps/alpha"]
+    }
+  }
+}
+""",
+                encoding="utf-8",
+            )
+            self.run_cli(
+                "structure",
+                "sync",
+                "--repo-root",
+                str(repo),
+            )
+
+            exit_code, output, error = self.run_cli(
+                "find",
+                "readme.md",
+                "--profile",
+                "ALPHA",
+                "--repo-root",
+                str(repo),
+            )
+            unknown_code, _, unknown_error = self.run_cli(
+                "find",
+                "readme.md",
+                "--profile",
+                "missing",
+                "--repo-root",
+                str(repo),
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(error, "")
+        self.assertIn("profile: alpha", output)
+        self.assertIn("apps/alpha/readme.md", output)
+        self.assertNotIn("apps/beta/readme.md", output)
+        self.assertEqual(unknown_code, EXIT_ERROR)
+        self.assertIn("unknown project profile", unknown_error)
 
 
 if __name__ == "__main__":

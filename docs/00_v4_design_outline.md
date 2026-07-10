@@ -305,7 +305,7 @@ Git管理する例は`config/project_profiles.example.json`、ローカル実設
 python ai-consult-tools/consult.py start
 python ai-consult-tools/consult.py review
 python ai-consult-tools/consult.py inspect
-python ai-consult-tools/consult.py find
+python ai-consult-tools/consult.py find <query> [--profile <name>]
 python ai-consult-tools/consult.py structure sync
 python ai-consult-tools/consult.py structure check
 ```
@@ -334,10 +334,26 @@ python ai-consult-tools/consult.py structure check
 
 ### `find`
 
-- ファイル名検索
-- 部分パス検索
-- 複数候補表示
-- プロジェクト範囲による絞り込み
+```text
+python ai-consult-tools/consult.py find <query>
+python ai-consult-tools/consult.py find <query> --profile <name>
+```
+
+- ローカルJSON構造インデックスに記録されたファイルだけを検索
+- 検索前に現在構造を走査し、JSONインデックスが最新か確認
+- 未生成、古い、形式不正の場合は自動更新せず終了コード2
+- 更新が必要な場合は`structure sync`を案内
+- 読み取り専用であり、ファイルとディレクトリを変更しない
+- 大文字小文字を区別しない
+- `\`は`/`へ正規化し、先頭`./`と末尾`/`を除去
+- 完全な相対パス一致を最優先
+- 完全なファイル名一致を次に優先
+- ファイル名部分一致を部分パス一致より優先
+- 同順位は相対パスの決定的ソート
+- 複数候補はすべて表示し、勝手に1件へ決定しない
+- `--profile`指定時は対象プロジェクト内だけに絞り込む
+- ローカル`project_profiles.json`があれば優先し、なければexampleを使用
+- 一致ありは終了コード0、一致なしは終了コード1、処理エラーは終了コード2
 
 ### `structure sync`
 
@@ -404,6 +420,7 @@ ai-consult-tools/
 │     ├─ cli.py
 │     ├─ config.py
 │     ├─ inventory.py
+│     ├─ search.py
 │     ├─ filters.py
 │     ├─ path_resolver.py
 │     ├─ git_diff.py
@@ -424,6 +441,7 @@ ai-consult-tools/
 ├─ tests/
 │  ├─ test_config.py
 │  ├─ test_inventory.py
+│  ├─ test_search.py
 │  ├─ test_filters.py
 │  ├─ test_path_resolver.py
 │  ├─ test_git_diff.py
@@ -514,8 +532,8 @@ V4-6で共通CLIを呼び出す薄いラッパーへ置換する。
 
 - V4-2A：構造走査コア・`folder_tree.txt`形式確定（完了）
 - V4-2B：`structure sync`・`structure check`（完了）
-- V4-2C前半：JSONインデックス・プロジェクトプロファイル
-- V4-2C後半：`find`
+- V4-2C前半：JSONインデックス・プロジェクトプロファイル（完了）
+- V4-2C後半：`find`（完了）
 
 ### V4-3 bundle生成
 

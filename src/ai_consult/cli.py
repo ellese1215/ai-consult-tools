@@ -6,7 +6,14 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from ai_consult import __version__
-from ai_consult.config import ConfigError, ConsultConfig, load_config, parse_config
+from ai_consult.config import (
+    ConfigError,
+    ConsultConfig,
+    ProjectProfile,
+    load_config,
+    load_project_profiles,
+    parse_config,
+)
 from ai_consult.filters import FilterError
 from ai_consult.inventory import (
     FolderTreeComparison,
@@ -18,21 +25,34 @@ from ai_consult.inventory import (
     compare_folder_tree,
     compare_structure_index,
     prepare_structure_index_parent,
+    read_structure_index,
     sync_folder_tree,
     sync_structure_index,
 )
 from ai_consult.path_resolver import PathResolutionError, RepoPathResolver
+from ai_consult.search import (
+    StructureSearchError,
+    find_structure_entries,
+    normalize_structure_query,
+)
 
 
 TOOL_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_REPO_ROOT = TOOL_ROOT.parent
 DEFAULT_LOCAL_CONFIG_PATH = Path("ai-consult-tools/local/consult.config.json")
+DEFAULT_LOCAL_PROJECT_PROFILES_PATH = Path(
+    "ai-consult-tools/local/project_profiles.json"
+)
+DEFAULT_PROJECT_PROFILES_EXAMPLE_PATH = Path(
+    "ai-consult-tools/config/project_profiles.example.json"
+)
 EXIT_CURRENT = 0
 EXIT_STALE = 1
+EXIT_NO_MATCH = 1
 EXIT_ERROR = 2
 
 
-def _add_structure_runtime_arguments(
+def _add_runtime_arguments(
     parser: argparse.ArgumentParser,
 ) -> None:
     parser.add_argument(
@@ -64,6 +84,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     commands = parser.add_subparsers(dest="command")
+
+    find_parser = commands.add_parser(
+        "find",
+        help="search file paths in the current local structure index",
+    )
+    find_parser.add_argument("query", help="file name or partial path")
+    find_parser.add_argument(
+        "--profile",
+        help="limit results to a named project profile",
+    )
+    _add_runtime_arguments(find_parser)
+    find_parser.set_defaults(handler=_run_find)
+
     structure_parser = commands.add_parser(
         "structure",
         help="manage the repository structure inventory",
@@ -80,7 +113,7 @@ def build_parser() -> argparse.ArgumentParser:
             "the repository structure changed"
         ),
     )
-    _add_structure_runtime_arguments(sync_parser)
+    _add_runtime_arguments(sync_parser)
     sync_parser.set_defaults(handler=_run_structure_sync)
 
     check_parser = structure_commands.add_parser(
@@ -90,7 +123,7 @@ def build_parser() -> argparse.ArgumentParser:
             "modifying files"
         ),
     )
-    _add_structure_runtime_arguments(check_parser)
+    _add_runtime_arguments(check_parser)
     check_parser.set_defaults(handler=_run_structure_check)
 
     return parser
@@ -128,6 +161,29 @@ def _load_runtime_config(
         return load_config(resolved.logical_path)
 
     return parse_config({"schemaVersion": 1})
+
+
+def _load_project_profile(
+    repo_root: Path,
+    name: str | None,
+) -> ProjectProfile | None:
+    if name is None:
+        return None
+
+    resolver = RepoPathResolver(repo_root)
+    local_path = repo_root / DEFAULT_LOCAL_PROJECT_PROFILES_PATH
+    requested = (
+        DEFAULT_LOCAL_PROJECT_PROFILES_PATH
+        if local_path.exists() or local_path.is_symlink()
+        else DEFAULT_PROJECT_PROFILES_EXAMPLE_PATH
+    )
+    resolved = resolver.resolve(
+        requested,
+        must_exist=True,
+        allow_file=True,
+        allow_directory=False,
+    )
+    return load_project_profiles(resolved.logical_path).get(name)
 
 
 def _create_snapshot(
@@ -188,6 +244,47 @@ def _print_index_comparison_details(
 
 def _status(updated: bool) -> str:
     return "updated" if updated else "current"
+
+
+def _run_find(args: argparse.Namespace) -> int:
+    query = normalize_structure_query(args.query)
+    snapshot = _create_snapshot(args)
+    comparison = compare_structure_index(snapshot)
+
+    if not comparison.is_current:
+        if not comparison.previous_exists:
+            state = "missing"
+        elif comparison.format_error is not None:
+            state = "invalid"
+        else:
+            state = "stale"
+
+        raise StructureSearchError(
+            f"structure index is {state}; run: "
+            "python ai-consult-tools/consult.py structure sync"
+        )
+
+    entries = read_structure_index(comparison.structure_index_path)
+    profile = _load_project_profile(snapshot.repo_root, args.profile)
+    matches = find_structure_entries(
+        entries,
+        query,
+        profile=profile,
+    )
+    profile_name = profile.name if profile is not None else "(all)"
+
+    if matches:
+        print(f"find: {len(matches)} matches")
+    else:
+        print("find: no matches")
+
+    print(f"query: {query}")
+    print(f"profile: {profile_name}")
+
+    for match in matches:
+        print(f"  [file] {match.entry.relative_path}")
+
+    return EXIT_CURRENT if matches else EXIT_NO_MATCH
 
 
 def _run_structure_sync(args: argparse.Namespace) -> int:
@@ -277,6 +374,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         FilterError,
         InventoryError,
         PathResolutionError,
+        StructureSearchError,
         OSError,
     ) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
