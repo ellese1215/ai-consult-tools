@@ -42,6 +42,7 @@ from ai_consult.inventory import (
     MoveCandidate,
     StructureDiff,
     StructureIndexComparison,
+    sync_structure_index,
 )
 from ai_consult.start_bundle import (
     PATH_INDEX_PATH,
@@ -1108,9 +1109,467 @@ class StartBundleAssemblyTest(unittest.TestCase):
             self.assertIn("| `folder_tree.txt` | `yes` | `current` |", status_item.content)
 
             manifest = render_manifest_csv(bundle)
+            manifest_lines = manifest.splitlines()
+            self.assertEqual(len(manifest_lines), 7)
+            self.assertEqual(
+                {line.split(",", 1)[0] for line in manifest_lines[1:]},
+                {
+                    REPO_OVERVIEW_PATH,
+                    PROJECT_TREE_PATH,
+                    STRUCTURE_STATUS_PATH,
+                    PATH_INDEX_PATH,
+                    SKIPPED_PATH,
+                    "project/main.txt",
+                },
+            )
             self.assertIn("REPO_OVERVIEW.md,text,generated", manifest)
             self.assertIn("project/main.txt,text,explicit", manifest)
             self.assertNotIn("MANIFEST.csv", manifest)
+
+    def test_empty_requests_and_empty_profile_tree_build_generated_only_bundle(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            outside = repo / "outside" / "ignored.txt"
+            outside.parent.mkdir()
+            outside.write_text("ignored\n", encoding="utf-8")
+
+            bundle = collect_start_bundle(
+                repo,
+                ConsultConfig(
+                    schema_version=1,
+                    filters=FilterConfig(),
+                ),
+                ProjectProfile(
+                    name="empty",
+                    scope_roots=("project",),
+                ),
+            )
+
+        self.assertEqual(
+            tuple(item.relative_path for item in bundle.items),
+            (
+                REPO_OVERVIEW_PATH,
+                PROJECT_TREE_PATH,
+                STRUCTURE_STATUS_PATH,
+                PATH_INDEX_PATH,
+                SKIPPED_PATH,
+            ),
+        )
+        self.assertEqual(bundle.target_paths, ())
+        self.assertEqual(bundle.path_resolutions, ())
+        self.assertEqual(bundle.skipped_items, ())
+
+        contents = {item.relative_path: item.content for item in bundle.items}
+        self.assertIn("- Entries: 0", contents[PROJECT_TREE_PATH])
+        self.assertIn("    (empty)\n", contents[PROJECT_TREE_PATH])
+        self.assertIn("- Requests: 0", contents[PATH_INDEX_PATH])
+        self.assertIn("- (none)\n", contents[PATH_INDEX_PATH])
+        self.assertIn("- Count: 0", contents[SKIPPED_PATH])
+        self.assertIn("(none)\n", contents[SKIPPED_PATH])
+        self.assertEqual(len(render_manifest_csv(bundle).splitlines()), 6)
+
+    def test_profile_boundaries_and_duplicate_requests_reach_final_bundle(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            inside = repo / "project" / "inside.txt"
+            outside = repo / "outside" / "shared.txt"
+            inside.parent.mkdir()
+            outside.parent.mkdir()
+            inside.write_text("inside\n", encoding="utf-8")
+            outside.write_text("outside\n", encoding="utf-8")
+            config = ConsultConfig(
+                schema_version=1,
+                filters=FilterConfig(),
+                include_sets=(
+                    IncludeSetConfig(
+                        name="common",
+                        paths=(
+                            "project/inside.txt",
+                            "outside/shared.txt",
+                        ),
+                    ),
+                ),
+            )
+
+            bundle = collect_start_bundle(
+                repo,
+                config,
+                ProjectProfile(
+                    name="project",
+                    scope_roots=("project",),
+                ),
+                include_set_names=("common",),
+                explicit_paths=(
+                    "project/inside.txt",
+                    "outside/shared.txt",
+                    "outside/shared.txt",
+                ),
+            )
+
+        self.assertEqual(
+            tuple(
+                resolution.status
+                for resolution in bundle.path_resolutions
+            ),
+            (
+                CollectionStatus.INCLUDED,
+                CollectionStatus.EXCLUDED,
+                CollectionStatus.INCLUDED,
+                CollectionStatus.INCLUDED,
+                CollectionStatus.INCLUDED,
+            ),
+        )
+        self.assertEqual(
+            tuple(item.relative_path for item in bundle.skipped_items),
+            ("outside/shared.txt",),
+        )
+        self.assertEqual(
+            tuple(item.relative_path for item in bundle.items[5:]),
+            ("project/inside.txt", "outside/shared.txt"),
+        )
+        self.assertIs(bundle.items[5].origin, BundleOrigin.INCLUDE_SET)
+        self.assertIs(bundle.items[6].origin, BundleOrigin.EXPLICIT)
+        self.assertIn(
+            "duplicate request; content already included by "
+            "include-set:common",
+            bundle.path_resolutions[2].reason or "",
+        )
+        self.assertIn(
+            "duplicate request; content already included by include-paths",
+            bundle.path_resolutions[4].reason or "",
+        )
+
+        path_index = next(
+            item.content
+            for item in bundle.items
+            if item.relative_path == PATH_INDEX_PATH
+        )
+        self.assertIn("Source: `include-set:common`", path_index)
+        self.assertIn("Source: `include-paths`", path_index)
+        self.assertIn("outside project profile", path_index)
+        self.assertEqual(path_index.count("duplicate request"), 2)
+
+        manifest = render_manifest_csv(bundle)
+        self.assertEqual(
+            manifest.count("project/inside.txt,text,include_set"),
+            1,
+        )
+        self.assertEqual(
+            manifest.count("outside/shared.txt,text,explicit"),
+            1,
+        )
+
+    def test_collection_failures_reach_path_index_skipped_and_manifest(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            project = repo / "project"
+            project.mkdir()
+            (project / "good.txt").write_text("ok\n", encoding="utf-8")
+            (project / "excluded.txt").write_text(
+                "excluded\n",
+                encoding="utf-8",
+            )
+            (project / "binary.bin").write_text(
+                "x",
+                encoding="utf-8",
+            )
+            (project / "large.txt").write_text(
+                "abcdefghij",
+                encoding="utf-8",
+            )
+            (project / "invalid.txt").write_bytes(b"\xff\xff")
+
+            bundle = collect_start_bundle(
+                repo,
+                ConsultConfig(
+                    schema_version=1,
+                    filters=FilterConfig(
+                        exclude_paths=("project/excluded.txt",),
+                        binary_extensions=(".bin",),
+                        max_text_bytes=5,
+                    ),
+                ),
+                ProjectProfile(
+                    name="project",
+                    scope_roots=("project",),
+                ),
+                explicit_paths=(
+                    "project/good.txt",
+                    "project/missing.txt",
+                    "project/excluded.txt",
+                    "project/binary.bin",
+                    "project/large.txt",
+                    "project/invalid.txt",
+                ),
+            )
+
+        expected_statuses = (
+            CollectionStatus.INCLUDED,
+            CollectionStatus.MISSING,
+            CollectionStatus.EXCLUDED,
+            CollectionStatus.BINARY,
+            CollectionStatus.TOO_LARGE,
+            CollectionStatus.DECODE_ERROR,
+        )
+        self.assertEqual(
+            tuple(
+                resolution.status
+                for resolution in bundle.path_resolutions
+            ),
+            expected_statuses,
+        )
+        self.assertEqual(
+            tuple(item.status for item in bundle.skipped_items),
+            expected_statuses[1:],
+        )
+        self.assertEqual(
+            tuple(item.relative_path for item in bundle.items[5:]),
+            ("project/good.txt",),
+        )
+
+        path_index = next(
+            item.content
+            for item in bundle.items
+            if item.relative_path == PATH_INDEX_PATH
+        )
+        skipped = next(
+            item.content
+            for item in bundle.items
+            if item.relative_path == SKIPPED_PATH
+        )
+
+        for status in expected_statuses:
+            self.assertIn(f"Status: `{status.value}`", path_index)
+
+        for status in expected_statuses[1:]:
+            self.assertIn(f"Status: `{status.value}`", skipped)
+
+        manifest = render_manifest_csv(bundle)
+        self.assertIn("project/good.txt,text,explicit", manifest)
+
+        for failed_path in (
+            "project/missing.txt",
+            "project/excluded.txt",
+            "project/binary.bin",
+            "project/large.txt",
+            "project/invalid.txt",
+        ):
+            self.assertNotIn(f"\n{failed_path},", manifest)
+
+    def test_current_structure_sources_remain_current_without_updates(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            source = repo / "project" / "main.txt"
+            source.parent.mkdir()
+            source.write_text("main\n", encoding="utf-8")
+            config = ConsultConfig(
+                schema_version=1,
+                filters=FilterConfig(),
+            )
+            profile = ProjectProfile(
+                name="project",
+                scope_roots=("project",),
+            )
+            collect_start_bundle(repo, config, profile)
+            collect_start_bundle(repo, config, profile)
+
+            bundle = collect_start_bundle(repo, config, profile)
+
+        status = next(
+            item.content
+            for item in bundle.items
+            if item.relative_path == STRUCTURE_STATUS_PATH
+        )
+        self.assertIn("| `folder_tree.txt` | `current` |", status)
+        self.assertIn(
+            "| `ai-consult-tools/local/cache/repo_structure_index.json` "
+            "| `current` |",
+            status,
+        )
+        self.assertIn("| `folder_tree.txt` | `no` | `current` |", status)
+        self.assertIn(
+            "| `ai-consult-tools/local/cache/repo_structure_index.json` "
+            "| `no` | `current` |",
+            status,
+        )
+
+    def test_stale_folder_tree_filters_outside_profile_diff(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            source = repo / "project" / "main.txt"
+            source.parent.mkdir()
+            source.write_text("main\n", encoding="utf-8")
+            config = ConsultConfig(
+                schema_version=1,
+                filters=FilterConfig(),
+            )
+            profile = ProjectProfile(
+                name="project",
+                scope_roots=("project",),
+            )
+            collect_start_bundle(repo, config, profile)
+            collect_start_bundle(repo, config, profile)
+            outside = repo / "outside" / "new.txt"
+            outside.parent.mkdir()
+            outside.write_text("outside\n", encoding="utf-8")
+            snapshot = InventoryScanner.from_config(repo, config).scan()
+            sync_structure_index(snapshot)
+
+            bundle = collect_start_bundle(repo, config, profile)
+
+        status = next(
+            item.content
+            for item in bundle.items
+            if item.relative_path == STRUCTURE_STATUS_PATH
+        )
+        project_tree = next(
+            item.content
+            for item in bundle.items
+            if item.relative_path == PROJECT_TREE_PATH
+        )
+        self.assertIn("| `folder_tree.txt` | `stale` |", status)
+        self.assertIn(
+            "| `ai-consult-tools/local/cache/repo_structure_index.json` "
+            "| `current` |",
+            status,
+        )
+        self.assertNotIn("outside/new.txt", status)
+        self.assertNotIn("outside/new.txt", project_tree)
+        self.assertIn("- (none)", status)
+
+    def test_invalid_structure_sources_are_reported_and_repaired(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            source = repo / "project" / "main.txt"
+            source.parent.mkdir()
+            source.write_text("main\n", encoding="utf-8")
+            config = ConsultConfig(
+                schema_version=1,
+                filters=FilterConfig(),
+            )
+            profile = ProjectProfile(
+                name="project",
+                scope_roots=("project",),
+            )
+            collect_start_bundle(repo, config, profile)
+            collect_start_bundle(repo, config, profile)
+            (repo / "folder_tree.txt").write_bytes(
+                b"\xef\xbb\xbfinvalid\n"
+            )
+            structure_index = (
+                repo
+                / "ai-consult-tools"
+                / "local"
+                / "cache"
+                / "repo_structure_index.json"
+            )
+            structure_index.write_bytes(b"{broken\n")
+
+            bundle = collect_start_bundle(repo, config, profile)
+
+        status = next(
+            item.content
+            for item in bundle.items
+            if item.relative_path == STRUCTURE_STATUS_PATH
+        )
+        self.assertIn("| `folder_tree.txt` | `invalid` |", status)
+        self.assertIn("must not contain a BOM", status)
+        self.assertIn(
+            "| `ai-consult-tools/local/cache/repo_structure_index.json` "
+            "| `invalid` |",
+            status,
+        )
+        self.assertIn("invalid structure index JSON", status)
+        self.assertIn("| `folder_tree.txt` | `yes` | `current` |", status)
+        self.assertIn(
+            "| `ai-consult-tools/local/cache/repo_structure_index.json` "
+            "| `yes` | `current` |",
+            status,
+        )
+
+    def test_same_current_input_is_deterministic_across_multiple_scope_roots(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            first = repo / "apps" / "project" / "a.txt"
+            second = repo / "common" / "project" / "b.txt"
+            outside = repo / "outside" / "ignored.txt"
+            first.parent.mkdir(parents=True)
+            second.parent.mkdir(parents=True)
+            outside.parent.mkdir()
+            first.write_text("a\n", encoding="utf-8")
+            second.write_text("b\n", encoding="utf-8")
+            outside.write_text("ignored\n", encoding="utf-8")
+            config = ConsultConfig(
+                schema_version=1,
+                filters=FilterConfig(),
+            )
+            profile = ProjectProfile(
+                name="project",
+                scope_roots=(
+                    "apps/project",
+                    "common/project",
+                    "apps/project",
+                ),
+            )
+            explicit_paths = (
+                "apps/project/a.txt",
+                "common/project/b.txt",
+            )
+            collect_start_bundle(repo, config, profile)
+            collect_start_bundle(repo, config, profile)
+
+            first_bundle = collect_start_bundle(
+                repo,
+                config,
+                profile,
+                explicit_paths=explicit_paths,
+            )
+            second_bundle = collect_start_bundle(
+                repo,
+                config,
+                profile,
+                explicit_paths=explicit_paths,
+            )
+
+        self.assertEqual(first_bundle, second_bundle)
+        self.assertEqual(
+            render_manifest_csv(first_bundle),
+            render_manifest_csv(second_bundle),
+        )
+        self.assertEqual(
+            tuple(item.relative_path for item in first_bundle.items),
+            (
+                REPO_OVERVIEW_PATH,
+                PROJECT_TREE_PATH,
+                STRUCTURE_STATUS_PATH,
+                PATH_INDEX_PATH,
+                SKIPPED_PATH,
+                "apps/project/a.txt",
+                "common/project/b.txt",
+            ),
+        )
+        project_tree = next(
+            item.content
+            for item in first_bundle.items
+            if item.relative_path == PROJECT_TREE_PATH
+        )
+        self.assertEqual(project_tree.count("a.txt"), 1)
+        self.assertEqual(project_tree.count("b.txt"), 1)
+        self.assertNotIn("outside/ignored.txt", project_tree)
 
     def test_scans_inventory_only_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
