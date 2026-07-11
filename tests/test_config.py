@@ -287,7 +287,7 @@ class ConfigTest(unittest.TestCase):
             config.get_include_set("common_rules").paths,
             (
                 "ai-consult-tools/shared/00_ai_consult_operation_rules.md",
-                "ai-consult-tools/local/chatgpt/consult.local_chatgpt.md",
+                "ai-consult-tools/local/consult.local.md",
             ),
         )
         self.assertNotIn(

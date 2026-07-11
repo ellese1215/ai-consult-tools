@@ -1,114 +1,84 @@
-# consult.local.md（プロジェクト固有設定）
+# consult.local.md
 
-> このファイルはGit管理外です（.gitignore に登録済み）。
-> consult.local.example.md をコピーして consult.local.md を作成し、あなたの環境に合わせて編集してください。
-> スレッド開始時のinclude bundleに必ず含めることで、AIがビルドコマンド等を推測なく把握できます。
+> File: `local/consult.local.md`
+> このファイルはGit管理外です。
+> `shared/consult.local.example.md`をコピーし、実環境に合わせて編集します。
 
----
+## 1. 環境
 
-## 1. ビルドコマンド
+| 項目 | 値 |
+|---|---|
+| RepoRoot | `<absolute-repo-root>` |
+| OS | `<Windows / macOS / Linux>` |
+| Shell | `<PowerShell / bash / zsh>` |
 
-TypeScript / SCSS を変更した後にCSSをビルドするコマンドを記載してください。
-AIは00_ai_consult_operation_rules.md の8章でこのコマンドを参照します。記載がない場合はBQで停止します。
+秘密情報、認証情報、個人情報は記載しません。
 
-```bash
-# 例1: npmワークスペース構成の場合
-cd <your-repo>; npm run build --workspace=apps/webs/your-app
+## 2. プロジェクト別コマンド
 
-# 例2: プロジェクトルートで直接ビルドする場合
-cd <your-repo>/apps/webs/your-app; npm run build
+変更内容に応じて必要となるビルド、試験、静的解析、DB確認などを記載します。
 
-# 例3: その他のビルドツールの場合
-# cd <your-repo>; <ビルドコマンド>
+```text
+<profile-name>:
+  build: <command or none>
+  test: <command or none>
+  manual_check: <procedure or none>
 ```
 
-**実際のビルドコマンド：**
-
-```bash
-# ここに実際のコマンドを記載してください
-```
-
----
-
-## 2. includeコマンドパターン
-
-よく使うinclude bundleの生成コマンドを記載してください。
-スレッド開始時のコマンド選択の参考にします。
-
-### 基本（運用ルール + consult.local.md のみ）
-
-**【Claude版】**
-
-```bash
-cd <your-repo>; python ai-consult-tools/claude/consult_bundle_claude.py \
-  --mode include \
-  --repo-root <your-repo> \
-  --case-name "<相談名>" \
-  --include-paths \
-    "ai-consult-tools/shared/00_ai_consult_operation_rules.md" \
-    "ai-consult-tools/local/claude/consult.local.md"
-```
-
-**【ChatGPT版】**
+例：
 
 ```powershell
-cd C:\xampp\htdocs
-python .\ai-consult-tools\chatgpt\consult_bundle_chatgpt.py `
-  --mode include `
-  --repo-root "C:\xampp\htdocs" `
-  --case-name "<相談名>" `
-  --include-paths `
-    "ai-consult-tools/shared/00_ai_consult_operation_rules.md" `
-    "ai-consult-tools/local/chatgpt/consult.local_chatgpt.md"
+cd <absolute-repo-root>
+npm run build --workspace=<workspace>
 ```
 
-### TODOドキュメント込み
+## 3. 共通CLI
 
-**【Claude版】**
+### 構造
 
-```bash
-# <TODOドキュメントのパス> を実際のパスに置き換えてください
-cd <your-repo>; python ai-consult-tools/claude/consult_bundle_claude.py \
-  --mode include \
-  --repo-root <your-repo> \
-  --case-name "<相談名>" \
-  --include-paths \
-    "ai-consult-tools/shared/00_ai_consult_operation_rules.md" \
-    "ai-consult-tools/local/claude/consult.local.md" \
-    "<TODOドキュメントのパス>"
+```text
+python ai-consult-tools/consult.py structure sync
+python ai-consult-tools/consult.py structure check
+python ai-consult-tools/consult.py find <query> --profile <name>
 ```
 
-**【ChatGPT版】**
+### 相談開始
 
-```powershell
-# <TODOドキュメントのパス> を実際のパスに置き換えてください
-cd C:\xampp\htdocs
-python .\ai-consult-tools\chatgpt\consult_bundle_chatgpt.py `
-  --mode include `
-  --repo-root "C:\xampp\htdocs" `
-  --case-name "<相談名>" `
-  --include-paths `
-    "ai-consult-tools/shared/00_ai_consult_operation_rules.md" `
-    "ai-consult-tools/local/chatgpt/consult.local_chatgpt.md" `
-    "<TODOドキュメントのパス>"
+```text
+python ai-consult-tools/consult.py start --target <chatgpt|claude> --profile <name> --case-name <case> --include-set common_rules --include-paths <path>...
 ```
 
-### よく使うパターン（任意で追加）
+### レビュー
 
-```bash
-# 【Claude版】パターン1: <説明>
-# cd <your-repo>; python ai-consult-tools/claude/consult_bundle_claude.py --mode include --repo-root <your-repo> --include-paths "..."
-
-# 【ChatGPT版】パターン1: <説明>
-# cd C:\xampp\htdocs; python .\ai-consult-tools\chatgpt\consult_bundle_chatgpt.py --mode include --repo-root "C:\xampp\htdocs" --include-paths "..."
+```text
+python ai-consult-tools/consult.py review --target <chatgpt|claude> --profile <name> --case-name <case> --target-paths <path>...
 ```
 
----
+相談ごとの長いファイル一覧や完了済みPhaseのコマンドは、この文書へ蓄積しません。
 
-## 3. プロジェクト固有の注意事項（任意）
+## 4. Git・remote・公開手順
 
-プロジェクト固有の運用上の注意点があれば記載してください。
+```text
+private remote:
+  name: <name>
+  target: <scope>
 
-- 例：デプロイ前に必ず〇〇を確認する
-- 例：〇〇ファイルは直接編集禁止（自動生成ファイル）
-- 例：〇〇ブランチには直接pushしない
+public remote:
+  name: <name or none>
+  url: <url or none>
+  target: <scope or none>
+
+push procedure:
+  <commands>
+
+failure rule:
+  <stop condition>
+```
+
+強制push、subtree、deployなどの個別手順は、確認済みの内容だけを記載します。
+
+## 5. プロジェクト固有の注意事項
+
+自動生成ファイル、直接編集禁止ファイル、deploy前確認など、現在有効な注意事項だけを記載します。
+
+一時的な作業状況や別案件の未コミット変更は、恒久的なlocal文書へ残しません。

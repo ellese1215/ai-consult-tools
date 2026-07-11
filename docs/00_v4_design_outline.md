@@ -302,12 +302,11 @@ Git管理する例は`config/project_profiles.example.json`、ローカル実設
 ## 8. CLI
 
 ```text
-python ai-consult-tools/consult.py start
-python ai-consult-tools/consult.py review
-python ai-consult-tools/consult.py inspect
 python ai-consult-tools/consult.py find <query> [--profile <name>]
 python ai-consult-tools/consult.py structure sync
 python ai-consult-tools/consult.py structure check
+python ai-consult-tools/consult.py start --target <chatgpt|claude> --profile <name>
+python ai-consult-tools/consult.py review --target <chatgpt|claude> --profile <name>
 ```
 
 ### `start`
@@ -323,14 +322,6 @@ python ai-consult-tools/consult.py structure check
 - unstaged、staged、未追跡を区別
 - stage前の未追跡ファイルも収録
 - 構造変更を収録
-
-### `inspect`
-
-- 関数
-- クラス
-- Markdown見出し
-- SQL定義
-- ファイル内部の軽量構造
 
 ### `find`
 
@@ -432,6 +423,9 @@ ai-consult-tools/
 ├─ config/
 │  ├─ consult.config.example.json
 │  └─ project_profiles.example.json
+├─ docs/
+│  ├─ 00_v4_design_outline.md
+│  └─ 01_current_spec.md
 ├─ templates/
 │  └─ session_start.md
 ├─ shared/
@@ -461,49 +455,81 @@ ai-consult-tools/
 
 ---
 
-## 11. 現行ファイルの移行分類
+## 11. 文書と現行ファイルの移行分類
 
-### 維持・更新
+### 11.1 V4-5で確定した正本の種類
+
+| 種類 | 正本 | 役割 |
+|---|---|---|
+| 公開入口 | `README.md` | 目的、導入、基本コマンド、文書案内 |
+| 共通運用ルール | `shared/00_ai_consult_operation_rules.md` | 相談、合意、変更、確認、Git安全運用 |
+| 現行技術仕様 | `docs/01_current_spec.md` | 共通CLI、設定、bundle、出力契約 |
+| セキュリティ | `shared/SECURITY.md` | 除外、機密情報、生成物の取扱い |
+| 公開設定例 | `config/*.example.json` | 共通設定とプロジェクトプロファイルの例 |
+| V4移行計画・履歴 | `docs/00_v4_design_outline.md` | 移行理由、フェーズ境界、完了記録 |
+| ローカル環境情報 | `local/consult.local.md` | RepoRoot、ビルド、実行、remoteなどの固有情報 |
+| 現行動作の検証根拠 | `src/ai_consult/`と`tests/` | 実装挙動と自動試験 |
+
+現行仕様、移行履歴、ローカル固有情報、保留事項を同じ文書へ混在させない。
+
+### 11.2 維持・更新
 
 - `ai-consult-tools/.gitignore`
 - `ai-consult-tools/LICENSE`
 - `ai-consult-tools/README.md`
 - `ai-consult-tools/docs/00_v4_design_outline.md`
+- `ai-consult-tools/docs/01_current_spec.md`
 - `ai-consult-tools/shared/00_ai_consult_operation_rules.md`
 - `ai-consult-tools/shared/SECURITY.md`
 - `ai-consult-tools/shared/consult.local.example.md`
+- `ai-consult-tools/config/consult.config.example.json`
+- `ai-consult-tools/config/project_profiles.example.json`
 - `folder_tree.txt`
 
-### 共通ファイルへ統合後に削除
+### 11.3 ローカル正本
+
+```text
+ai-consult-tools/local/
+├─ consult.config.json
+├─ project_profiles.json
+├─ consult.local.md
+└─ cache/
+   └─ repo_structure_index.json
+```
+
+`project_profiles.json`はローカル上書きが必要な場合だけ作成する。存在しない場合は`config/project_profiles.example.json`を使用する。
+
+### 11.4 V4-6まで保持する旧版資料
+
+以下はV4共通CLIの現行仕様ではない。V4-5では旧版資料であることを明示するだけとし、最終統合と削除はV4-6で行う。
 
 - ChatGPT・Claude別の仕様書
 - ChatGPT・Claude別のテンプレート
 - ChatGPT・Claude別のセッションガイド
 - release README
+- ChatGPT版の旧テストコマンド文書
 - モデル別example設定
+- `local/chatgpt/`と`local/claude/`の旧実設定
 
-### 一時的な互換ラッパー
+### 11.5 一時的な互換ラッパー
 
 - `chatgpt/consult_bundle_chatgpt.py`
 - `claude/consult_bundle_claude.py`
 
-V4-4までは既存実装を維持する。
+V4-6で共通CLIを呼び出す薄いラッパーへ置換する。V4-5では変更しない。
 
-V4-6で共通CLIを呼び出す薄いラッパーへ置換する。
-
-### V4-6で削除
+### 11.6 V4-6で削除
 
 - `tree.txt`
 - `duplicate_filenames_report.md`
+- 統合後に不要となる旧モデル別文書・設定例
 
-### Git変更対象外
+### 11.7 Git変更対象外
 
 - `archive/`
 - ChatGPT・Claudeの生成済みbundle
 - `local/`の実設定
 - RepoRootの`ai-consult-tools.zip`
-
----
 
 ## 12. 実装フェーズ
 
@@ -574,15 +600,24 @@ V4-6で共通CLIを呼び出す薄いラッパーへ置換する。
 - 既存ChatGPT版・Claude版スクリプトは変更せず、V4-6で互換ラッパー化する
 - V4-4完了時の全試験：196件成功、3件skip（Windowsのsymlink作成権限による既存試験）
 
-### V4-5 運用文書整理
+### V4-5 運用文書整理：完了
 
-- 共通ルール短縮
-- 正本の種類を分離
+- 文書の実在状況と役割を確認
+- 公開入口、共通運用、現行技術仕様、移行履歴、ローカル情報を分離
+- `docs/01_current_spec.md`を現行技術仕様の正本として新規作成
+- 共通ルールを短縮し、技術仕様とローカル情報を分離
 - 現行仕様と履歴を分離
 - 文書新規作成規則
 - 保留項目規則
 - L1からL3の変更レベル
 - TODO・引き継ぎ文の肥大化防止
+- `README.md`、`SECURITY.md`、共通localテンプレート、共通設定例を現行共通CLIへ更新
+- Git管理外の共通local設定とローカル環境文書を新設
+- 旧モデル別9文書は削除せず、V4-6まで保持する旧版資料であることだけを明示
+- `inspect`案は未採用としてV4対象から削除
+- 共通設定例の新しいlocal参照先に合わせて設定試験の期待値を更新
+- `folder_tree.txt`と構造キャッシュはV4-5のコミット対象外とし、旧スクリプトの互換ラッパー化と旧文書の最終統合・削除はV4-6へ残した
+- V4-5完了時の全試験：196件成功、3件skip（Windowsのsymlink作成権限による既存試験）
 
 ### V4-6 移行・整理
 

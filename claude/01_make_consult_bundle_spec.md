@@ -1,5 +1,10 @@
 # 01 consult_bundle_claude.py 技術仕様
 
+> **旧版資料**
+>
+> 本書はV4-6まで保持する旧モデル別スクリプト用資料です。現行共通CLIの正本ではありません。
+> 現行の利用方法は`../README.md`、技術仕様は`../docs/01_current_spec.md`、運用ルールは`../shared/00_ai_consult_operation_rules.md`を参照してください。
+
 > File: 01_make_consult_bundle_spec.md
 > Version: 2.0.0
 > Updated: 2026-06-07

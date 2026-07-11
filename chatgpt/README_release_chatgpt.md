@@ -1,5 +1,10 @@
 # ChatGPT相談ツール（consult_bundle_chatgpt）
 
+> **旧版資料**
+>
+> 本書はV4-6まで保持する旧モデル別スクリプト用資料です。現行共通CLIの正本ではありません。
+> 現行の利用方法は`../README.md`、技術仕様は`../docs/01_current_spec.md`、運用ルールは`../shared/00_ai_consult_operation_rules.md`を参照してください。
+
 > File: README_release_chatgpt.md.
 
 このディレクトリは、ChatGPT相談用の bundle 生成ツールと、ChatGPT専用ドキュメントを管理します。

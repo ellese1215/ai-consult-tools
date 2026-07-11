@@ -1,104 +1,119 @@
 # SECURITY.md
 
-> File: SECURITY.md
-> Version: 1.2.0
-> Updated: 2026-06-07
+> File: `shared/SECURITY.md`
+> Updated: 2026-07-11
+> Status: AI相談運用基盤v4
 
-このファイルは、`consult_bundle_claude.py` / `consult_bundle_chatgpt.py` を使用する際のセキュリティ上の注意事項を説明します。
+## 1. この文書の役割
 
----
+本書は、構造走査、本文収集、review、生成bundleにおける機密情報とローカル情報の取扱いを定義する。
 
-## 1. secret patternsによる自動除外
+技術的な設定スキーマは`docs/01_current_spec.md`を参照する。
 
-スクリプトは、`consult.config.json` の `secretNamePatterns` に一致するファイルを**自動的に除外**します。
+## 2. 自動除外だけに依存しない
 
-デフォルトで除外されるパターン（`consult.config.example.json` の既定値）：
+現在の実装は、構造走査に組み込み除外規則を持つ。主な対象は以下である。
 
-| パターン | 対象例 |
+```text
+.git
+node_modules
+vendor
+主要build生成物
+consult生成物
+ai-consult-tools/local/
+ai-consult-tools/archive/
+.env系
+秘密鍵・証明書
+credential・secretを含む代表的な名前
+```
+
+ただし、自動除外は機密性を保証しない。
+
+- ファイル本文の秘密情報を意味解析しない
+- 通常名のソースや設定へ埋め込まれたAPIキーを検出できない
+- プロジェクト固有の秘密名をすべて把握できない
+- 明示対象やローカル文書には、共有を意図した固有情報が含まれる場合がある
+
+bundle生成前と外部共有前に、人が対象と内容を確認する。
+
+## 3. 共通設定で追加除外する
+
+現行共通設定で使用できる関連項目は以下である。
+
+| キー | 用途 |
 |---|---|
-| `.env*` | `.env`, `.env.local`, `.env.production` |
-| `*.env*` | `app.env`, `database.env` |
-| `*secret*` | `secret_key.txt`, `my_secrets.json` |
-| `*secrets*.*` | `secrets.yaml`, `app.secrets.json` |
-| `*credential*` | `credentials.json`, `aws_credential` |
-| `*.pem` | サーバー証明書、SSHキー |
-| `*.key` | 秘密鍵ファイル |
-| `*.pfx` / `*.p12` | 証明書ファイル |
-| `id_rsa*` | SSH秘密鍵 |
-| `*.jks` / `*.keystore` | Javaキーストア |
-| `key.properties` | Androidビルドキー |
-| `local.properties` | ローカル環境設定 |
-| `google-services.json` | Firebase設定 |
-| `GoogleService-Info.plist` | Firebase設定（iOS） |
+| `filters.excludePaths` | 本文収集から追加除外する |
+| `filters.binaryExtensions` | 追加拡張子をバイナリとして扱う |
+| `filters.maxTextBytes` | 1ファイルの本文収集上限 |
+| `inventory.excludePaths` | 構造走査から追加除外する |
 
----
-
-## 2. 自動除外の限界と注意事項
-
-**secret patternsはファイル名のパターンマッチングです。ファイルの内容は検査しません。**
-
-以下の点に注意してください：
-
-- 機密情報がパターンに一致しないファイル名で保存されている場合は除外されません
-- 例：`config.php` の中に APIキーがハードコードされていても除外されません
-- バンドル生成前に、出力対象のファイルに機密情報が含まれていないか確認してください
-
----
-
-## 3. consult.config.json の取り扱い
-
-`consult.config.json` 自体には機密情報を書かないでください。
-
-このファイルには以下のみを記載してください：
-
-- フォルダ名・拡張子・ファイル名パターンのリスト（文字列）
-- 出力先パス・運用ルールファイルのパス（相対パス）
-
-APIキー、パスワード、トークン、接続文字列等は記載しないでください。
-
----
-
-## 4. 生成物（バンドルMD / ZIP）の取り扱い
-
-バンドルはコードの実体を含むため、取り扱いに注意してください：
-
-- バンドルはAIへの一時的な添付物として使用し、不要になったら削除してください
-- `consult_case/` フォルダをGit管理外（`.gitignore`）にすることを推奨します
-- バンドルを外部に共有する場合は、内容に機密情報が含まれていないことを確認してください
-- `local/` 配下のファイル（`consult.local.md`、`consult.config.json` 等）を明示 include したバンドルには、ローカル固有の設定（ビルドコマンド、リポジトリ URL 等）が含まれる場合があります。外部に共有する前に内容を確認してください
-
----
-
-## 5. secretNamePatterns のカスタマイズ
-
-プロジェクト固有の機密ファイルがある場合は、`consult.config.json` の `secretNamePatterns` に追加してください。
+構造にも本文にも出したくないパスは、必要に応じて両方へ指定する。
 
 ```json
 {
-  "secretNamePatterns": [
-    ".env*",
-    "*.env*",
-    "*secret*",
-    "*secrets*.*",
-    "*credential*",
-    "*.pem",
-    "*.key",
-    "*.pfx",
-    "*.p12",
-    "id_rsa*",
-    "*.jks",
-    "*.keystore",
-    "key.properties",
-    "local.properties",
-    "google-services.json",
-    "GoogleService-Info.plist",
-    "your-custom-pattern*"
-  ]
+  "schemaVersion": 1,
+  "filters": {
+    "excludePaths": [
+      "private/",
+      "config/production.php"
+    ],
+    "binaryExtensions": [
+      ".psd",
+      ".clip"
+    ],
+    "maxTextBytes": 2000000
+  },
+  "inventory": {
+    "excludePaths": [
+      "private/",
+      "config/production.php"
+    ]
+  }
 }
 ```
 
----
+設定内のパスはRepoRoot相対、`/`区切りの正規形で記載する。
 
-## 6. 脆弱性の報告
+旧版の`secretNamePatterns`、`excludeFolders`、`excludeExtensions`などは現行共通設定のキーではない。未知のキーは設定エラーになる。
 
-このツールに関するセキュリティ上の問題を発見した場合は、Issueまたはリポジトリのコンタクト手段を通じてご報告ください。
+## 4. localファイル
+
+以下はGit管理しない。
+
+```text
+ai-consult-tools/local/consult.config.json
+ai-consult-tools/local/project_profiles.json
+ai-consult-tools/local/consult.local.md
+ai-consult-tools/local/cache/
+```
+
+`consult.config.json`と`project_profiles.json`へ秘密情報を書かない。
+
+`consult.local.md`にはローカルパス、ビルドコマンド、remote URL、deploy手順などを記載できるが、パスワード、トークン、秘密鍵、接続文字列は記載しない。
+
+`consult.local.md`をstart bundleへ含める場合、外部共有前に内容を確認する。
+
+## 5. 明示対象とreview
+
+`start --include-paths`では、必要なファイルだけを指定する。
+
+- `.env`、秘密鍵、証明書、認証情報を指定しない
+- 実データや個人情報を含むexportを指定しない
+- DB dump、ログ、バックアップを安易に含めない
+- 不足・除外・失敗は`PATH_INDEX.md`と`SKIPPED.md`で確認する
+
+`review`では差分と未追跡ファイルの本文が含まれる。commit対象でなくても、対象パス内の変更がbundleへ入る可能性があるため、`--target-paths`を限定する。
+
+## 6. 生成物
+
+ChatGPT ZIPとClaude Markdownは、収録したソース、差分、manifest、ローカル情報を含む場合がある。
+
+- `consult_case/`をGit管理しない
+- 公開リポジトリや共有ストレージへ無条件に置かない
+- 外部共有前に`INDEX.md`、`PATH_INDEX.md`または`DIFF_INDEX.md`、`SKIPPED.md`、`MANIFEST.csv`を確認する
+- 不要な生成物は、必要なレビューと記録が終わった後に削除できる
+- bundleを恒久的な仕様正本として保管しない
+
+## 7. 問題の報告
+
+このツールの境界判定、除外、収集、出力にセキュリティ上の問題を確認した場合は、公開前にリポジトリ管理者へ報告する。秘密情報そのものを公開Issueへ貼り付けない。

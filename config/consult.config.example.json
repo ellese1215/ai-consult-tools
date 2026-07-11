@@ -21,7 +21,7 @@
   "includeSets": {
     "common_rules": [
       "ai-consult-tools/shared/00_ai_consult_operation_rules.md",
-      "ai-consult-tools/local/chatgpt/consult.local_chatgpt.md"
+      "ai-consult-tools/local/consult.local.md"
     ]
   },
   "outputs": {

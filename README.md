@@ -1,181 +1,159 @@
 # ai-consult-tools
 
-Claude・ChatGPT との開発相談を、**Git管理されたローカルリポジトリを根拠に行う**ためのツールセットです。
+Git管理されたローカルリポジトリを根拠に、ChatGPT・Claudeとの開発相談を進めるための共通CLIです。
 
-AIへの「推測による回答」を構造的に防ぎ、コードとドキュメントの実体を一次根拠とした相談フローを実現します。
+AI相談運用基盤v4では、収集・Git差分・bundle内部モデルを共通化し、ChatGPTとClaudeの違いを最終出力形式だけに限定しています。
 
----
-
-## ツール構成
-
-```
-ai-consult-tools/
-├── shared/     # Claude / ChatGPT 共通ドキュメント
-├── claude/     # Claude用スクリプト・ドキュメント
-├── chatgpt/    # ChatGPT用スクリプト・ドキュメント
-├── local/      # ローカル実設定（Git管理外）
-│   ├── claude/
-│   └── chatgpt/
-└── archive/    # 退避物（Git管理外）
-```
-
-Claude版は `claude/README_release.md`、ChatGPT版は `chatgpt/README_release_chatgpt.md` をお読みください。
-
----
-
-## 特徴
-
-- **4モード対応**：map（軽量地図）/ include（範囲指定）/ diff（差分）/ repo（全体）
-- **除外ルールをJSONで管理**：`.git`、`node_modules`、機密ファイル等を自動除外
-- **Claude版はMDファイルで出力**：Claudeに添付するだけで根拠確定できる構造
-- **ChatGPT版はZIPファイルで出力**：INDEX.md / TREE.md / MANIFEST.csv / partファイル群をZIPにまとめて添付
-- **クロスプラットフォーム対応**：Windows / Mac / Linux で動作
-
----
+> 現在はV4移行中です。正式バージョンと旧スクリプトの整理はV4-6で確定します。
 
 ## 動作要件
 
-- **Python 3.9 以上**
-  - 外部ライブラリ不要（標準ライブラリのみで動作）
-- **Git**（リポジトリが `git init` 済みであること）
+- Python 3.10以上
+- Git管理されたリポジトリ
+- 外部Pythonパッケージ不要
 
----
+コマンドはRepoRootで実行します。
+
+```text
+python ai-consult-tools/consult.py <command> [options]
+```
 
 ## セットアップ
 
-### 1. ファイルを配置する
+### 1. 共通設定を作成する
 
-`ai-consult-tools/` ディレクトリを対象プロジェクトのリポジトリルート配下に配置してください。
+```powershell
+New-Item -ItemType Directory -Force .\ai-consult-tools\local | Out-Null
 
-```
-your-repo/
-└── ai-consult-tools/
-    ├── shared/
-    ├── claude/
-    ├── chatgpt/
-    ├── local/      # 初回セットアップで作成（Git管理外）
-    └── archive/    # 退避物置き場（Git管理外）
-```
+Copy-Item `
+  .\ai-consult-tools\config\consult.config.example.json `
+  .\ai-consult-tools\local\consult.config.json
 
-### 2. 設定ファイルを作成する
-
-使用するAIに応じて、公開テンプレートから `local/` 配下に実設定を作成してください。
-
-まず `local/` 配下のディレクトリを作成します。
-
-```bash
-# Mac / Linux
-mkdir -p ai-consult-tools/local/claude ai-consult-tools/local/chatgpt
-
-# Windows (PowerShell)
-New-Item -ItemType Directory -Force -Path ai-consult-tools\local\claude
-New-Item -ItemType Directory -Force -Path ai-consult-tools\local\chatgpt
+Copy-Item `
+  .\ai-consult-tools\shared\consult.local.example.md `
+  .\ai-consult-tools\local\consult.local.md
 ```
 
-**Claude版：**
+`local/consult.local.md`へ、RepoRoot、ビルド・試験コマンド、remote・deployなどのローカル固有情報を記入します。
 
-```bash
-# Mac / Linux
-cp ai-consult-tools/claude/consult.config.example.json ai-consult-tools/local/claude/consult.config.json
-cp ai-consult-tools/shared/consult.local.example.md ai-consult-tools/local/claude/consult.local.md
+`config/project_profiles.example.json`が対象リポジトリに合わない場合だけ、次を作成して編集します。
 
-# Windows (PowerShell)
-Copy-Item ai-consult-tools\claude\consult.config.example.json ai-consult-tools\local\claude\consult.config.json
-Copy-Item ai-consult-tools\shared\consult.local.example.md ai-consult-tools\local\claude\consult.local.md
+```powershell
+Copy-Item `
+  .\ai-consult-tools\config\project_profiles.example.json `
+  .\ai-consult-tools\local\project_profiles.json
 ```
 
-**ChatGPT版：**
+`local/`はGit管理しません。設定ファイルへAPIキー、パスワード、トークンなどを書かないでください。
 
-```bash
-# Mac / Linux
-cp ai-consult-tools/chatgpt/consult.config.example_chatgpt.json ai-consult-tools/local/chatgpt/consult.config_chatgpt.json
-cp ai-consult-tools/shared/consult.local.example.md ai-consult-tools/local/chatgpt/consult.local_chatgpt.md
+## 基本コマンド
 
-# Windows (PowerShell)
-Copy-Item ai-consult-tools\chatgpt\consult.config.example_chatgpt.json ai-consult-tools\local\chatgpt\consult.config_chatgpt.json
-Copy-Item ai-consult-tools\shared\consult.local.example.md ai-consult-tools\local\chatgpt\consult.local_chatgpt.md
+### 構造を同期する
+
+```text
+python ai-consult-tools/consult.py structure sync
 ```
 
-主な設定項目：
+`folder_tree.txt`とローカル構造インデックスを、同一の構造snapshotから同期します。
 
-| キー | 説明 |
+`start`もbundle生成前に同じ構造同期を自動実行します。手動の`structure sync`は、`find`を使う前に索引だけを更新する場合や、bundleを生成せず構造正本だけを同期する場合に使用します。
+
+確認だけを行う場合：
+
+```text
+python ai-consult-tools/consult.py structure check
+```
+
+パスを検索する場合：
+
+```text
+python ai-consult-tools/consult.py find <query>
+python ai-consult-tools/consult.py find <query> --profile <name>
+```
+
+### 相談開始用bundleを作る
+
+ChatGPT：
+
+```text
+python ai-consult-tools/consult.py start --target chatgpt --profile <name> --case-name <case> --include-set common_rules --include-paths <path>...
+```
+
+Claude：
+
+```text
+python ai-consult-tools/consult.py start --target claude --profile <name> --case-name <case> --include-set common_rules --include-paths <path>...
+```
+
+`--include-paths`には、今回の相談に必要な仕様書、実装、試験だけをRepoRoot相対で指定します。
+
+`start`は実行時の構造を走査し、`folder_tree.txt`と`local/cache/repo_structure_index.json`を必要に応じて更新します。構造に一時ファイルや作業用フォルダを残したまま実行しないでください。
+
+### 変更をレビューする
+
+ChatGPT：
+
+```text
+python ai-consult-tools/consult.py review --target chatgpt --profile <name> --case-name <case> --target-paths <path>...
+```
+
+Claude：
+
+```text
+python ai-consult-tools/consult.py review --target claude --profile <name> --case-name <case> --target-paths <path>...
+```
+
+`review`はstaged、unstaged、未追跡を区別して収集します。対象パスを明示し、無関係な変更を混ぜないでください。
+
+## 出力
+
+既定の出力先は以下です。
+
+```text
+ChatGPT:
+ai-consult-tools/chatgpt/consult_case/<BundleLabel>/<BundleLabel>.zip
+
+Claude:
+ai-consult-tools/claude/consult_case/<BundleLabel>/
+```
+
+ChatGPTは決定的ZIP、Claudeは結合Markdownまたはpart分割Markdownを生成します。収集結果とmanifestの契約は共通です。
+
+## 基本フロー
+
+```text
+必要に応じて structure sync
+→ start bundle
+→ 参照確認
+→ 仕様・変更範囲・受入条件の合意
+→ 文書・実装
+→ 試験
+→ review bundle
+→ commit
+→ push
+```
+
+bundleは生成時点の参照スナップショットです。恒久的な仕様正本ではありません。
+
+## 文書
+
+| 文書 | 役割 |
 |---|---|
-| `outRoot` | 生成物の出力先（リポジトリルートからの相対パス） |
-| `ruleFile` | 運用ルールファイルのパス |
-| `excludeFolders` | 除外するフォルダのリスト |
-| `secretNamePatterns` | 除外する機密ファイルのパターン |
+| `shared/00_ai_consult_operation_rules.md` | 共通の相談・変更・レビュー運用 |
+| `docs/01_current_spec.md` | 共通CLI、設定、bundle、出力の現行技術仕様 |
+| `shared/SECURITY.md` | 除外、機密情報、生成物の取扱い |
+| `shared/consult.local.example.md` | Git管理外のローカル文書テンプレート |
+| `config/consult.config.example.json` | 共通設定例 |
+| `config/project_profiles.example.json` | プロジェクトプロファイル例 |
+| `docs/00_v4_design_outline.md` | V4移行計画・履歴 |
 
-### 3. local/ と consult_case/ をGit管理外にする
-
-`local/` と `archive/` はすでに `.gitignore` に登録済みです。
-生成物（`consult_case/`）もGit管理外です。追加設定は不要です。
-
----
-
-## 基本的な使い方
-
-すべてのコマンドは **リポジトリルートで実行**してください。
-
-### Claude版
-
-```bash
-# map：リポジトリ全体の構造を把握する
-python ai-consult-tools/claude/consult_bundle_claude.py --mode map --repo-root <your-repo>
-
-# include：特定のファイル・フォルダを本文付きで出力する
-python ai-consult-tools/claude/consult_bundle_claude.py --mode include --repo-root <your-repo> \
-  --include-paths "ai-consult-tools/shared/00_ai_consult_operation_rules.md" "src/controllers"
-
-# diff：修正後の変更内容をレビューする
-python ai-consult-tools/claude/consult_bundle_claude.py --mode diff --repo-root <your-repo>
-
-# repo：リポジトリ全体を本文付きで出力する
-python ai-consult-tools/claude/consult_bundle_claude.py --mode repo --repo-root <your-repo>
-```
-
-### ChatGPT版
-
-```bash
-# map
-python ai-consult-tools/chatgpt/consult_bundle_chatgpt.py --mode map --repo-root <your-repo>
-
-# include
-python ai-consult-tools/chatgpt/consult_bundle_chatgpt.py --mode include --repo-root <your-repo> \
-  --include-paths "ai-consult-tools/shared/00_ai_consult_operation_rules.md" "src/controllers"
-
-# diff
-python ai-consult-tools/chatgpt/consult_bundle_chatgpt.py --mode diff --repo-root <your-repo>
-
-# repo
-python ai-consult-tools/chatgpt/consult_bundle_chatgpt.py --mode repo --repo-root <your-repo>
-```
-
-生成された `.md`（Claude版）または `.zip`（ChatGPT版）をAIのチャットに添付して相談を開始します。
-
----
-
-## 基本的な相談フロー
-
-```
-map（構造把握）→ include（本文根拠の固定）→ 仕様案 → 合意 → 実装 → diff（レビュー）→ commit
-```
-
-詳細は各フォルダ内のドキュメントを参照してください。
-
-- `claude/README_release.md` — Claude版セットアップ・使い方の詳細
-- `chatgpt/README_release_chatgpt.md` — ChatGPT版セットアップ・使い方の詳細
-- `shared/00_ai_consult_operation_rules.md` — AI相談の運用ルール（Claude / ChatGPT 共通）
-- `claude/01_make_consult_bundle_spec.md` — Claude版スクリプト技術仕様
-- `chatgpt/01_make_consult_bundle_spec_chatgpt.md` — ChatGPT版スクリプト技術仕様
-- `claude/03_claude_session_guide.md` — セッション開始ガイド（Claude用）
-
----
+`chatgpt/`と`claude/`に残る旧仕様書、旧README、旧ガイド、旧テンプレートは、V4-6まで保持する旧モデル別スクリプト用資料です。現行共通CLIの正本ではありません。
 
 ## セキュリティ
 
-機密ファイル（`.env*`、`*.pem`、`*.key` 等）は自動的に除外されます。詳細は `shared/SECURITY.md` を参照してください。
+bundleはソースコード、差分、ローカル固有情報を含む場合があります。生成前と外部共有前に対象・`SKIPPED.md`・`MANIFEST.csv`を確認してください。
 
----
+詳細は`shared/SECURITY.md`を参照してください。
 
 ## ライセンス
 

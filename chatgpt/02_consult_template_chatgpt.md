@@ -1,5 +1,10 @@
 # 02 ChatGPT相談開始テンプレート
 
+> **旧版資料**
+>
+> 本書はV4-6まで保持する旧モデル別スクリプト用資料です。現行共通CLIの正本ではありません。
+> 現行の利用方法は`../README.md`、技術仕様は`../docs/01_current_spec.md`、運用ルールは`../shared/00_ai_consult_operation_rules.md`を参照してください。
+
 > File: 02_consult_template_chatgpt.md.
 
 ChatGPTに相談を開始するときは、まず参照 bundle を生成し、その bundle を唯一の正として扱います。
