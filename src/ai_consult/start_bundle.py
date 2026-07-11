@@ -7,7 +7,9 @@ from enum import Enum
 from pathlib import Path, PurePosixPath
 
 from ai_consult.bundle import (
+    BundleCommand,
     BundleItem,
+    BundleModel,
     BundleOrigin,
     ContentKind,
     PathResolution,
@@ -21,13 +23,19 @@ from ai_consult.collection import (
 from ai_consult.config import ConsultConfig, ProjectProfile
 from ai_consult.inventory import (
     FolderTreeComparison,
+    InventoryError,
     InventoryEntry,
     InventoryEntryType,
+    InventoryScanner,
     InventorySnapshot,
     MoveCandidate,
     StructureDiff,
     StructureIndexComparison,
     STRUCTURE_INDEX_RELATIVE_PATH,
+    compare_folder_tree,
+    compare_structure_index,
+    sync_folder_tree,
+    sync_structure_index,
 )
 from ai_consult.path_resolver import (
     PathResolutionError,
@@ -40,6 +48,10 @@ class StartBundleStructureError(ValueError):
 
 
 class StartBundleDocumentError(ValueError):
+    pass
+
+
+class StartBundleAssemblyError(RuntimeError):
     pass
 
 
@@ -1280,6 +1292,124 @@ def build_start_generated_items(
             strict=True,
         )
     )
+
+
+def collect_start_bundle(
+    repo_root: str | Path,
+    config: ConsultConfig,
+    profile: ProjectProfile,
+    *,
+    include_set_names: Iterable[str] = (),
+    explicit_paths: Iterable[str] = (),
+) -> BundleModel:
+    _require_type(config, ConsultConfig, "config")
+    _require_type(profile, ProjectProfile, "profile")
+
+    try:
+        scanner = InventoryScanner.from_config(repo_root, config)
+        inventory_snapshot = scanner.scan()
+        folder_tree_before = compare_folder_tree(inventory_snapshot)
+        structure_index_before = compare_structure_index(inventory_snapshot)
+        folder_tree_sync = sync_folder_tree(inventory_snapshot)
+        structure_index_sync = sync_structure_index(inventory_snapshot)
+    except (InventoryError, OSError, ValueError) as exc:
+        raise StartBundleAssemblyError(
+            f"cannot synchronize start bundle structure: {exc}"
+        ) from exc
+
+    if folder_tree_sync.comparison != folder_tree_before:
+        raise StartBundleAssemblyError(
+            "folder_tree.txt changed while the start bundle was being assembled"
+        )
+
+    if structure_index_sync.comparison != structure_index_before:
+        raise StartBundleAssemblyError(
+            "structure index changed while the start bundle was being assembled"
+        )
+
+    try:
+        folder_tree_after = compare_folder_tree(inventory_snapshot)
+        structure_index_after = compare_structure_index(inventory_snapshot)
+        structure_status = build_structure_status(
+            profile,
+            folder_tree_before,
+            structure_index_before,
+            folder_tree_updated=folder_tree_sync.updated,
+            structure_index_updated=structure_index_sync.updated,
+            folder_tree_after=folder_tree_after,
+            structure_index_after=structure_index_after,
+        )
+        project_tree = build_project_tree(inventory_snapshot, profile)
+        collection_snapshot = collect_start_files(
+            scanner.repo_root,
+            config,
+            profile,
+            include_set_names=include_set_names,
+            explicit_paths=explicit_paths,
+        )
+        generated_items = build_start_generated_items(
+            project_tree,
+            structure_status,
+            collection_snapshot,
+        )
+        items = _merge_start_items(
+            generated_items,
+            collection_snapshot.items,
+        )
+    except (
+        StartBundleCollectionError,
+        StartBundleDocumentError,
+        StartBundleStructureError,
+        InventoryError,
+        OSError,
+        ValueError,
+    ) as exc:
+        raise StartBundleAssemblyError(
+            f"cannot assemble start bundle: {exc}"
+        ) from exc
+
+    return BundleModel(
+        command=BundleCommand.START,
+        profile_name=profile.name,
+        items=items,
+        path_resolutions=collection_snapshot.path_resolutions,
+        skipped_items=collection_snapshot.skipped_items,
+    )
+
+
+def _merge_start_items(
+    generated_items: Iterable[BundleItem],
+    collected_items: Iterable[BundleItem],
+) -> tuple[BundleItem, ...]:
+    generated = tuple(generated_items)
+    collected = tuple(collected_items)
+
+    if not all(isinstance(item, BundleItem) for item in generated):
+        raise StartBundleAssemblyError(
+            "generated_items must contain only BundleItem values"
+        )
+
+    if not all(isinstance(item, BundleItem) for item in collected):
+        raise StartBundleAssemblyError(
+            "collected_items must contain only BundleItem values"
+        )
+
+    seen: dict[str, BundleItem] = {}
+
+    for item in (*generated, *collected):
+        folded = item.relative_path.casefold()
+        previous = seen.get(folded)
+
+        if previous is not None:
+            raise StartBundleAssemblyError(
+                "start bundle item path collision: "
+                f"{previous.relative_path} ({previous.origin.value}) and "
+                f"{item.relative_path} ({item.origin.value})"
+            )
+
+        seen[folded] = item
+
+    return generated + collected
 
 
 def _inline_text(value: str) -> str:

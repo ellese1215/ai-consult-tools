@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 TOOL_ROOT = Path(__file__).resolve().parents[1]
@@ -14,7 +15,12 @@ SRC_ROOT = TOOL_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from ai_consult.bundle import BundleOrigin, ContentKind
+from ai_consult.bundle import (
+    BundleCommand,
+    BundleOrigin,
+    ContentKind,
+    render_manifest_csv,
+)
 from ai_consult.collection import (
     CollectedTextFile,
     CollectionResult,
@@ -28,8 +34,10 @@ from ai_consult.config import (
 )
 from ai_consult.inventory import (
     FolderTreeComparison,
+    InventoryError,
     InventoryEntry,
     InventoryEntryType,
+    InventoryScanner,
     InventorySnapshot,
     MoveCandidate,
     StructureDiff,
@@ -41,6 +49,7 @@ from ai_consult.start_bundle import (
     REPO_OVERVIEW_PATH,
     SKIPPED_PATH,
     STRUCTURE_STATUS_PATH,
+    StartBundleAssemblyError,
     StartBundleCollectionError,
     StartBundleDocumentError,
     StartBundleStructureError,
@@ -54,6 +63,7 @@ from ai_consult.start_bundle import (
     build_start_file_requests,
     build_start_generated_items,
     build_structure_status,
+    collect_start_bundle,
     collect_start_files,
     render_path_index,
     render_project_tree,
@@ -1032,6 +1042,210 @@ class StartGeneratedDocumentTest(unittest.TestCase):
                 path_resolutions=snapshot.path_resolutions,
                 skipped_items=(),
             )
+
+
+class StartBundleAssemblyTest(unittest.TestCase):
+    def test_collects_complete_start_bundle_and_syncs_structure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            source = repo / "project" / "main.txt"
+            source.parent.mkdir()
+            source.write_text("main\n", encoding="utf-8")
+            config = ConsultConfig(
+                schema_version=1,
+                filters=FilterConfig(),
+            )
+            profile = ProjectProfile(
+                name="project",
+                scope_roots=("project",),
+            )
+
+            bundle = collect_start_bundle(
+                repo,
+                config,
+                profile,
+                explicit_paths=("project/main.txt",),
+            )
+
+            self.assertIs(bundle.command, BundleCommand.START)
+            self.assertEqual(bundle.profile_name, "project")
+            self.assertEqual(bundle.target_paths, ())
+            self.assertEqual(
+                tuple(item.relative_path for item in bundle.items),
+                (
+                    REPO_OVERVIEW_PATH,
+                    PROJECT_TREE_PATH,
+                    STRUCTURE_STATUS_PATH,
+                    PATH_INDEX_PATH,
+                    SKIPPED_PATH,
+                    "project/main.txt",
+                ),
+            )
+            self.assertEqual(len(bundle.path_resolutions), 1)
+            self.assertEqual(bundle.skipped_items, ())
+            self.assertTrue((repo / "folder_tree.txt").is_file())
+            self.assertTrue(
+                (
+                    repo
+                    / "ai-consult-tools"
+                    / "local"
+                    / "cache"
+                    / "repo_structure_index.json"
+                ).is_file()
+            )
+
+            status_item = next(
+                item
+                for item in bundle.items
+                if item.relative_path == STRUCTURE_STATUS_PATH
+            )
+            self.assertIn("| `folder_tree.txt` | `missing` |", status_item.content)
+            self.assertIn(
+                "| `ai-consult-tools/local/cache/repo_structure_index.json` "
+                "| `missing` |",
+                status_item.content,
+            )
+            self.assertIn("| `folder_tree.txt` | `yes` | `current` |", status_item.content)
+
+            manifest = render_manifest_csv(bundle)
+            self.assertIn("REPO_OVERVIEW.md,text,generated", manifest)
+            self.assertIn("project/main.txt,text,explicit", manifest)
+            self.assertNotIn("MANIFEST.csv", manifest)
+
+    def test_scans_inventory_only_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            project = repo / "project"
+            project.mkdir()
+            config = ConsultConfig(
+                schema_version=1,
+                filters=FilterConfig(),
+            )
+            profile = ProjectProfile(
+                name="project",
+                scope_roots=("project",),
+            )
+            original_scan = InventoryScanner.scan
+
+            with mock.patch.object(
+                InventoryScanner,
+                "scan",
+                autospec=True,
+                side_effect=original_scan,
+            ) as scan:
+                collect_start_bundle(repo, config, profile)
+
+        self.assertEqual(scan.call_count, 1)
+
+    def test_explicit_folder_tree_is_collected_after_sync(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            source = repo / "project" / "main.txt"
+            source.parent.mkdir()
+            source.write_text("main\n", encoding="utf-8")
+
+            bundle = collect_start_bundle(
+                repo,
+                ConsultConfig(
+                    schema_version=1,
+                    filters=FilterConfig(),
+                ),
+                ProjectProfile(
+                    name="project",
+                    scope_roots=("project",),
+                ),
+                explicit_paths=("folder_tree.txt",),
+            )
+
+        folder_tree_item = next(
+            item
+            for item in bundle.items
+            if item.relative_path == "folder_tree.txt"
+        )
+        self.assertIs(folder_tree_item.origin, BundleOrigin.EXPLICIT)
+        self.assertIn("project/\n", folder_tree_item.content)
+        self.assertIn("project/main.txt\n", folder_tree_item.content)
+
+    def test_generated_document_path_collision_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "project").mkdir()
+            (repo / PATH_INDEX_PATH).write_text(
+                "repository file\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                StartBundleAssemblyError,
+                "path collision",
+            ):
+                collect_start_bundle(
+                    repo,
+                    ConsultConfig(
+                        schema_version=1,
+                        filters=FilterConfig(),
+                    ),
+                    ProjectProfile(
+                        name="project",
+                        scope_roots=("project",),
+                    ),
+                    explicit_paths=(PATH_INDEX_PATH,),
+                )
+
+    def test_structure_sync_failure_aborts_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "project").mkdir()
+
+            with mock.patch(
+                "ai_consult.start_bundle.sync_structure_index",
+                side_effect=InventoryError("write failed"),
+            ):
+                with self.assertRaisesRegex(
+                    StartBundleAssemblyError,
+                    "cannot synchronize",
+                ):
+                    collect_start_bundle(
+                        repo,
+                        ConsultConfig(
+                            schema_version=1,
+                            filters=FilterConfig(),
+                        ),
+                        ProjectProfile(
+                            name="project",
+                            scope_roots=("project",),
+                        ),
+                    )
+
+    def test_structure_change_during_sync_aborts_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "project").mkdir()
+            stale = folder_comparison(
+                current=False,
+                exists=True,
+                diff=StructureDiff(added_paths=("project",)),
+            )
+
+            with mock.patch(
+                "ai_consult.start_bundle.compare_folder_tree",
+                return_value=stale,
+            ):
+                with self.assertRaisesRegex(
+                    StartBundleAssemblyError,
+                    "changed while",
+                ):
+                    collect_start_bundle(
+                        repo,
+                        ConsultConfig(
+                            schema_version=1,
+                            filters=FilterConfig(),
+                        ),
+                        ProjectProfile(
+                            name="project",
+                            scope_roots=("project",),
+                        ),
+                    )
 
 
 if __name__ == "__main__":
