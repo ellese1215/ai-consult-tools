@@ -105,6 +105,26 @@ python ai-consult-tools/consult.py review --target claude --profile <name> --cas
 
 `review`はstaged、unstaged、未追跡を区別して収集します。対象パスを明示し、無関係な変更を混ぜないでください。
 
+## 旧スクリプト互換入口
+
+旧ファイルパスからの移行用に、次の薄い互換ラッパーを残します。新しいコマンドや運用では`consult.py`を使用してください。
+
+```text
+ai-consult-tools/chatgpt/consult_bundle_chatgpt.py
+ai-consult-tools/claude/consult_bundle_claude.py
+```
+
+互換入口では`--profile`が必須です。ChatGPT版は`chatgpt`、Claude版は`claude`へ出力targetを固定し、旧4モードを次の現行コマンドへ変換します。
+
+| 旧モード | 現行処理 |
+|---|---|
+| `map` | 構造資料だけを収める`start` |
+| `repo` | 選択profileの`scopeRoots`を収集する`start` |
+| `include` | 指定対象を収集する`start` |
+| `diff` | staged、unstaged、未追跡を収集する`review` |
+
+旧設定schema、旧出力形式、staged限定、unstaged限定、任意ref間diff、旧basename検索、絶対パスincludeは維持しません。未対応指定は成果物生成前に終了コード2で拒否します。
+
 ## 出力
 
 既定の出力先は以下です。
