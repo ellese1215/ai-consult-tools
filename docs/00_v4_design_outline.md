@@ -554,12 +554,25 @@ V4-6で共通CLIを呼び出す薄いラッパーへ置換する。
 - V4-3D-5では実装欠陥は確認されず、試験追加だけを行った
 - モデル別物理出力とCLI接続はV4-4で扱う
 
-### V4-4 出力アダプター
+### V4-4 出力アダプター：完了
 
-- ChatGPT ZIP
-- Claude Markdown
-- 内容一致テスト
-- 未置換プレースホルダー検査
+- V4-4A：共通レンダリング基盤
+- V4-4B：ChatGPT向け決定的ZIP出力
+- V4-4C：Claude向け結合Markdown・part分割
+- V4-4D：共通CLIからの`start` / `review`接続
+- V4-4E：統合・境界試験
+- `BundleModel`は変更せず、物理出力設定を別の出力コンテキストとして扱う
+- 共通CLIの成果物名は`<DocSet>_start[_<CaseName>]`、`<DocSet>_review[_<CaseName>]`とする
+- 共通設定にChatGPT・Claude別の出力先とpart上限を追加する
+- manifestは共通8列を使用し、生成文書名はV4共通モデルへ統一する
+- BundleItem本文はorigin、git change、previous path、encoding、source metadataを保持する
+- 生成テキストはUTF-8 BOMなし・LF・末尾LFありとする
+- ChatGPT ZIPはentry順・timestamp・permissionを固定し、同一入力から同一バイト列を生成する
+- Claude出力は実part名をINDEXへ記録し、未置換プレースホルダーを残さない
+- 最終成果物は一時出力の完成・検証後に確定し、同名成果物は上書きしない
+- 変更ゼロのreviewはCLIでは成果物を作らず、skipのみの場合は成果物を生成する
+- 既存ChatGPT版・Claude版スクリプトは変更せず、V4-6で互換ラッパー化する
+- V4-4完了時の全試験：196件成功、3件skip（Windowsのsymlink作成権限による既存試験）
 
 ### V4-5 運用文書整理
 
