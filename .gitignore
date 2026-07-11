@@ -1,29 +1,12 @@
-# consult_case: bundle生成物（一時的な添付用ファイル群、Git管理外）
-claude/consult_case/
-chatgpt/consult_case/
-
-claude/consult.config.json
-chatgpt/consult.config.json
-# backups: generated/manual backup snapshots, Git管理外
-.backups/
-**/.backups/
-# consult.local.md: プロジェクト固有設定（Git管理外）
-claude/consult.local.md
-chatgpt/consult.local.md
-
-# BEGIN ai-consult-tools generated/local artifacts
-
 # Local private configuration and local-only archives
 local/
 archive/
 
-# Generated consult cases
+# Generated consultation artifacts
 claude/consult_case/
 chatgpt/consult_case/
 consult_case/
 consult_project/
-
-# END ai-consult-tools generated/local artifacts
 
 # Python runtime artifacts
 __pycache__/
