@@ -621,13 +621,45 @@ V4-6で共通CLIを呼び出す薄いラッパーへ置換する。V4-5では変
 
 ### V4-6 移行・整理
 
-- 旧スクリプトを互換ラッパー化
-- 重複仕様・ガイドを統合
-- `tree.txt`削除
-- `duplicate_filenames_report.md`削除
-- 旧生成物を通常配布対象から除外
-- clean export
-- 正式バージョン確定
+#### V4-6A 契約確定：完了
+
+- 旧ChatGPT版・Claude版スクリプトの実在内容と、現行共通CLIとの差分を確認した
+- 旧スクリプトのファイルパスと`map`、`repo`、`include`、`diff`の4モード名は互換入口として維持する
+- 互換入口では`--profile`を必須とし、ChatGPT版は`chatgpt`、Claude版は`claude`へtargetを固定する
+- `map`は構造資料中心の`start`、`repo`は選択profileの`scopeRoots`全体を対象にした`start`、`include`は明示対象付き`start`、`diff`は現行`review`へ変換する
+- staged限定、unstaged限定、任意ref間diff、旧basename検索、絶対パスinclude、旧出力形式、旧設定schemaの自動読替えは維持しない
+- 未対応旧引数と旧設定schemaは成果物生成前に終了コード2で拒否し、現行入口への移行を案内する
+- 旧ChatGPT設定例と現行共通local設定を比較し、現行共通設定例へ追加すべき有効設定はないことを確認した
+- 旧モデル別文書・設定例は、互換ラッパー実装と代替先確認後に削除する
+- `tree.txt`と`duplicate_filenames_report.md`は削除し、`folder_tree.txt`と`local/cache/repo_structure_index.json`は維持する
+- 通常配布対象はpublicリポジトリの正式追跡ツリーとし、clean exportは同じツリーを`git archive`したZIPとする
+- バージョン正本は`src/ai_consult/__init__.py`の`__version__`一か所とし、正式版は`4.0.0`とする
+- release ZIP名は`ai-consult-tools-4.0.0.zip`、public tagは`v4.0.0`とし、CHANGELOGとGitHub Releaseは新設しない
+- V4-6Aでは現行CLI動作、旧スクリプト、旧文書を変更しない
+
+#### V4-6B 互換ラッパー
+
+- 共通の旧引数変換モジュールを追加する
+- ChatGPT版・Claude版旧スクリプトを薄い互換ラッパーへ置換する
+- 互換入口の引数変換、固定target、終了コード、拒否条件を自動試験する
+- 実装完了後にREADMEと現行技術仕様へ互換入口の現行契約を反映する
+
+#### V4-6C 旧構成整理
+
+- 旧モデル別仕様書、README、ガイド、テンプレート、設定例を削除する
+- Git管理外の`local/chatgpt/`と`local/claude/`を共通local構成へ移行して削除する
+- `tree.txt`と`duplicate_filenames_report.md`を削除する
+- 旧生成物と不要な旧構成が通常配布対象へ残っていないことを確認する
+- 構造正本とローカル構造インデックスを同期する
+
+#### V4-6D 正式release
+
+- `__version__`を`4.0.0`へ更新する
+- 全試験とclean export展開後試験を実行する
+- clean exportにlocal、cache、archive、consult_case、秘密情報、旧文書・旧設定例が含まれないことを確認する
+- originへpushし、publicへsubtree pushする
+- publicへ`v4.0.0` tagを作成する
+- V4-6完了結果を本書へ記録する
 
 ---
 
