@@ -3,9 +3,11 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
+from datetime import datetime
 from pathlib import Path
 
 from ai_consult import __version__
+from ai_consult.bundle import BundleModel
 from ai_consult.config import (
     ConfigError,
     ConsultConfig,
@@ -15,6 +17,23 @@ from ai_consult.config import (
     parse_config,
 )
 from ai_consult.filters import FilterError
+from ai_consult.git_diff import GitDiffError, collect_review_bundle
+from ai_consult.renderers import (
+    OutputAdapterError,
+    OutputTarget,
+    create_output_context,
+    write_chatgpt_bundle,
+    write_claude_bundle,
+)
+from ai_consult.renderers.common import (
+    JST,
+    OutputContext,
+    OutputResult,
+)
+from ai_consult.start_bundle import (
+    StartBundleAssemblyError,
+    collect_start_bundle,
+)
 from ai_consult.inventory import (
     FolderTreeComparison,
     InventoryError,
@@ -71,6 +90,27 @@ def _add_runtime_arguments(
     )
 
 
+def _add_bundle_arguments(
+    parser: argparse.ArgumentParser,
+) -> None:
+    parser.add_argument(
+        "--target",
+        required=True,
+        choices=tuple(target.value for target in OutputTarget),
+        help="physical output target",
+    )
+    parser.add_argument(
+        "--profile",
+        required=True,
+        help="named project profile",
+    )
+    parser.add_argument(
+        "--case-name",
+        help="optional ASCII case name appended to BundleLabel",
+    )
+    _add_runtime_arguments(parser)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="consult.py",
@@ -125,6 +165,38 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_runtime_arguments(check_parser)
     check_parser.set_defaults(handler=_run_structure_check)
+
+    start_parser = commands.add_parser(
+        "start",
+        help="collect and write a start consultation bundle",
+    )
+    _add_bundle_arguments(start_parser)
+    start_parser.add_argument(
+        "--include-set",
+        action="append",
+        default=[],
+        help="named include set; may be specified more than once",
+    )
+    start_parser.add_argument(
+        "--include-paths",
+        nargs="*",
+        default=[],
+        help="explicit RepoRoot-relative files or directories",
+    )
+    start_parser.set_defaults(handler=_run_start)
+
+    review_parser = commands.add_parser(
+        "review",
+        help="collect and write a review consultation bundle",
+    )
+    _add_bundle_arguments(review_parser)
+    review_parser.add_argument(
+        "--target-paths",
+        nargs="*",
+        default=[],
+        help="optional RepoRoot-relative review targets",
+    )
+    review_parser.set_defaults(handler=_run_review)
 
     return parser
 
@@ -357,6 +429,107 @@ def _run_structure_check(args: argparse.Namespace) -> int:
     return EXIT_STALE
 
 
+def _build_output_context(
+    args: argparse.Namespace,
+    repo_root: Path,
+    config: ConsultConfig,
+) -> OutputContext:
+    target = OutputTarget(args.target)
+    generated_at = datetime.now(tz=JST)
+
+    if target is OutputTarget.CHATGPT:
+        settings = config.outputs.chatgpt
+        return create_output_context(
+            target=target,
+            repo_root=repo_root,
+            output_root=repo_root / settings.out_root,
+            generated_at=generated_at,
+            case_name=args.case_name,
+            max_chars_per_part=settings.max_chars_per_part,
+            max_bytes_per_part=settings.max_bytes_per_part,
+        )
+
+    settings = config.outputs.claude
+    return create_output_context(
+        target=target,
+        repo_root=repo_root,
+        output_root=repo_root / settings.out_root,
+        generated_at=generated_at,
+        case_name=args.case_name,
+        max_chars_per_part=settings.max_chars_per_part,
+    )
+
+
+def _write_bundle(
+    bundle: BundleModel,
+    context: OutputContext,
+) -> OutputResult:
+    if context.target is OutputTarget.CHATGPT:
+        return write_chatgpt_bundle(bundle, context)
+
+    return write_claude_bundle(bundle, context)
+
+
+def _print_output_result(
+    command: str,
+    result: OutputResult,
+) -> None:
+    print(f"{command}: created")
+    print(f"target: {result.target.value}")
+    print(f"bundle: {result.bundle_label}")
+
+    for path in result.output_paths:
+        print(f"output: {path}")
+
+
+def _run_start(args: argparse.Namespace) -> int:
+    repo_root = _resolve_repo_root(args.repo_root)
+    config = _load_runtime_config(repo_root, args.config_path)
+    profile = _load_project_profile(repo_root, args.profile)
+
+    if profile is None:
+        raise ConfigError("start requires a project profile")
+
+    bundle = collect_start_bundle(
+        repo_root,
+        config,
+        profile,
+        include_set_names=args.include_set,
+        explicit_paths=args.include_paths,
+    )
+    context = _build_output_context(args, repo_root, config)
+    result = _write_bundle(bundle, context)
+    _print_output_result("start", result)
+    return EXIT_CURRENT
+
+
+def _run_review(args: argparse.Namespace) -> int:
+    repo_root = _resolve_repo_root(args.repo_root)
+    config = _load_runtime_config(repo_root, args.config_path)
+    profile = _load_project_profile(repo_root, args.profile)
+
+    if profile is None:
+        raise ConfigError("review requires a project profile")
+
+    bundle = collect_review_bundle(
+        repo_root,
+        config,
+        profile,
+        target_paths=args.target_paths,
+    )
+
+    if not bundle.items and not bundle.skipped_items:
+        print("review: no changes")
+        print(f"target: {args.target}")
+        print(f"profile: {profile.name}")
+        return EXIT_CURRENT
+
+    context = _build_output_context(args, repo_root, config)
+    result = _write_bundle(bundle, context)
+    _print_output_result("review", result)
+    return EXIT_CURRENT
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -375,6 +548,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         InventoryError,
         PathResolutionError,
         StructureSearchError,
+        GitDiffError,
+        StartBundleAssemblyError,
+        OutputAdapterError,
         OSError,
     ) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

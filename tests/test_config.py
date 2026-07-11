@@ -132,6 +132,83 @@ class ConfigTest(unittest.TestCase):
         ):
             config.get_include_set("missing")
 
+    def test_output_defaults_are_applied_without_section(self) -> None:
+        config = parse_config(
+            {
+                "schemaVersion": 1,
+                "filters": {},
+            }
+        )
+
+        self.assertEqual(
+            config.outputs.chatgpt.out_root,
+            "ai-consult-tools/chatgpt/consult_case",
+        )
+        self.assertEqual(
+            config.outputs.chatgpt.max_bytes_per_part,
+            536_870_912,
+        )
+        self.assertEqual(
+            config.outputs.chatgpt.max_chars_per_part,
+            300_000,
+        )
+        self.assertEqual(
+            config.outputs.claude.out_root,
+            "ai-consult-tools/claude/consult_case",
+        )
+        self.assertEqual(
+            config.outputs.claude.max_chars_per_part,
+            300_000,
+        )
+
+    def test_parses_model_output_settings(self) -> None:
+        config = parse_config(
+            {
+                "schemaVersion": 1,
+                "outputs": {
+                    "chatgpt": {
+                        "outRoot": "build/chatgpt",
+                        "maxBytesPerPart": 1234,
+                        "maxCharsPerPart": 567,
+                    },
+                    "claude": {
+                        "outRoot": "build/claude",
+                        "maxCharsPerPart": 890,
+                    },
+                },
+            }
+        )
+
+        self.assertEqual(config.outputs.chatgpt.out_root, "build/chatgpt")
+        self.assertEqual(config.outputs.chatgpt.max_bytes_per_part, 1234)
+        self.assertEqual(config.outputs.chatgpt.max_chars_per_part, 567)
+        self.assertEqual(config.outputs.claude.out_root, "build/claude")
+        self.assertEqual(config.outputs.claude.max_chars_per_part, 890)
+
+    def test_rejects_invalid_output_settings(self) -> None:
+        invalid_payloads = (
+            {"outputs": []},
+            {"outputs": {"unexpected": {}}},
+            {"outputs": {"chatgpt": []}},
+            {"outputs": {"claude": []}},
+            {"outputs": {"chatgpt": {"unexpected": 1}}},
+            {"outputs": {"claude": {"unexpected": 1}}},
+            {"outputs": {"chatgpt": {"outRoot": "/outside"}}},
+            {"outputs": {"chatgpt": {"outRoot": ".."}}},
+            {"outputs": {"claude": {"outRoot": "bad\\path"}}},
+            {"outputs": {"chatgpt": {"maxBytesPerPart": 0}}},
+            {"outputs": {"chatgpt": {"maxCharsPerPart": True}}},
+            {"outputs": {"claude": {"maxCharsPerPart": -1}}},
+        )
+
+        for extra in invalid_payloads:
+            with self.subTest(extra=extra):
+                payload = {"schemaVersion": 1}
+                payload.update(extra)
+
+                with self.assertRaises(ConfigError):
+                    parse_config(payload)
+
     def test_inventory_defaults_are_applied_without_section(self) -> None:
         config = parse_config(
             {
@@ -216,6 +293,14 @@ class ConfigTest(unittest.TestCase):
         self.assertNotIn(
             "ai-consult-tools/local/",
             config.filters.exclude_paths,
+        )
+        self.assertEqual(
+            config.outputs.chatgpt.out_root,
+            "ai-consult-tools/chatgpt/consult_case",
+        )
+        self.assertEqual(
+            config.outputs.claude.out_root,
+            "ai-consult-tools/claude/consult_case",
         )
 
     def test_loads_utf8_bom_json(self) -> None:

@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 
 TOOL_ROOT = Path(__file__).resolve().parents[1]
@@ -14,7 +16,14 @@ SRC_ROOT = TOOL_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from ai_consult.cli import EXIT_ERROR, EXIT_NO_MATCH, EXIT_STALE, main
+from ai_consult.cli import (
+    EXIT_ERROR,
+    EXIT_NO_MATCH,
+    EXIT_STALE,
+    build_parser,
+    main,
+)
+from ai_consult.config import parse_config
 
 
 class StructureCliTest(unittest.TestCase):
@@ -440,3 +449,198 @@ class StructureCliTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BundleCliConnectionTest(unittest.TestCase):
+    def run_cli(self, *arguments: str) -> tuple[int, str, str]:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(arguments)
+
+        return exit_code, stdout.getvalue(), stderr.getvalue()
+
+    def test_parser_accepts_approved_start_and_review_contract(self) -> None:
+        parser = build_parser()
+        start = parser.parse_args(
+            (
+                "start",
+                "--target",
+                "chatgpt",
+                "--profile",
+                "ai_consult_tools",
+                "--case-name",
+                "case_a",
+                "--include-set",
+                "common_rules",
+                "--include-paths",
+                "docs/a.md",
+                "docs/b.md",
+            )
+        )
+        review = parser.parse_args(
+            (
+                "review",
+                "--target",
+                "claude",
+                "--profile",
+                "ai_consult_tools",
+                "--target-paths",
+                "src",
+                "tests",
+            )
+        )
+
+        self.assertEqual(start.command, "start")
+        self.assertEqual(start.target, "chatgpt")
+        self.assertEqual(start.include_set, ["common_rules"])
+        self.assertEqual(
+            start.include_paths,
+            ["docs/a.md", "docs/b.md"],
+        )
+        self.assertEqual(review.command, "review")
+        self.assertEqual(review.target, "claude")
+        self.assertEqual(review.target_paths, ["src", "tests"])
+
+    def test_start_collects_once_and_dispatches_selected_target(self) -> None:
+        config = parse_config({"schemaVersion": 1})
+        profile = SimpleNamespace(name="ai_consult_tools")
+        bundle = object()
+        context = object()
+        result = object()
+
+        with patch(
+            "ai_consult.cli._resolve_repo_root",
+            return_value=Path("C:/repo"),
+        ), patch(
+            "ai_consult.cli._load_runtime_config",
+            return_value=config,
+        ), patch(
+            "ai_consult.cli._load_project_profile",
+            return_value=profile,
+        ), patch(
+            "ai_consult.cli.collect_start_bundle",
+            return_value=bundle,
+        ) as collect, patch(
+            "ai_consult.cli._build_output_context",
+            return_value=context,
+        ) as build_context, patch(
+            "ai_consult.cli._write_bundle",
+            return_value=result,
+        ) as write, patch(
+            "ai_consult.cli._print_output_result"
+        ) as print_result:
+            exit_code, output, error = self.run_cli(
+                "start",
+                "--target",
+                "chatgpt",
+                "--profile",
+                "ai_consult_tools",
+                "--include-set",
+                "common_rules",
+                "--include-paths",
+                "docs/a.md",
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(output, "")
+        self.assertEqual(error, "")
+        collect.assert_called_once_with(
+            Path("C:/repo"),
+            config,
+            profile,
+            include_set_names=["common_rules"],
+            explicit_paths=["docs/a.md"],
+        )
+        build_context.assert_called_once()
+        write.assert_called_once_with(bundle, context)
+        print_result.assert_called_once_with("start", result)
+
+    def test_empty_review_returns_without_creating_output(self) -> None:
+        config = parse_config({"schemaVersion": 1})
+        profile = SimpleNamespace(name="ai_consult_tools")
+        bundle = SimpleNamespace(items=(), skipped_items=())
+
+        with patch(
+            "ai_consult.cli._resolve_repo_root",
+            return_value=Path("C:/repo"),
+        ), patch(
+            "ai_consult.cli._load_runtime_config",
+            return_value=config,
+        ), patch(
+            "ai_consult.cli._load_project_profile",
+            return_value=profile,
+        ), patch(
+            "ai_consult.cli.collect_review_bundle",
+            return_value=bundle,
+        ) as collect, patch(
+            "ai_consult.cli._build_output_context"
+        ) as build_context, patch(
+            "ai_consult.cli._write_bundle"
+        ) as write:
+            exit_code, output, error = self.run_cli(
+                "review",
+                "--target",
+                "claude",
+                "--profile",
+                "ai_consult_tools",
+                "--target-paths",
+                "src",
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("review: no changes", output)
+        self.assertEqual(error, "")
+        collect.assert_called_once_with(
+            Path("C:/repo"),
+            config,
+            profile,
+            target_paths=["src"],
+        )
+        build_context.assert_not_called()
+        write.assert_not_called()
+
+
+    def test_skip_only_review_creates_output(self) -> None:
+        config = parse_config({"schemaVersion": 1})
+        profile = SimpleNamespace(name="ai_consult_tools")
+        bundle = SimpleNamespace(items=(), skipped_items=(object(),))
+        context = object()
+        result = object()
+
+        with patch(
+            "ai_consult.cli._resolve_repo_root",
+            return_value=Path("C:/repo"),
+        ), patch(
+            "ai_consult.cli._load_runtime_config",
+            return_value=config,
+        ), patch(
+            "ai_consult.cli._load_project_profile",
+            return_value=profile,
+        ), patch(
+            "ai_consult.cli.collect_review_bundle",
+            return_value=bundle,
+        ), patch(
+            "ai_consult.cli._build_output_context",
+            return_value=context,
+        ) as build_context, patch(
+            "ai_consult.cli._write_bundle",
+            return_value=result,
+        ) as write, patch(
+            "ai_consult.cli._print_output_result"
+        ) as print_result:
+            exit_code, output, error = self.run_cli(
+                "review",
+                "--target",
+                "chatgpt",
+                "--profile",
+                "ai_consult_tools",
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(output, "")
+        self.assertEqual(error, "")
+        build_context.assert_called_once()
+        write.assert_called_once_with(bundle, context)
+        print_result.assert_called_once_with("review", result)

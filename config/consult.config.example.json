@@ -23,5 +23,16 @@
       "ai-consult-tools/shared/00_ai_consult_operation_rules.md",
       "ai-consult-tools/local/chatgpt/consult.local_chatgpt.md"
     ]
+  },
+  "outputs": {
+    "chatgpt": {
+      "outRoot": "ai-consult-tools/chatgpt/consult_case",
+      "maxBytesPerPart": 536870912,
+      "maxCharsPerPart": 300000
+    },
+    "claude": {
+      "outRoot": "ai-consult-tools/claude/consult_case",
+      "maxCharsPerPart": 300000
+    }
   }
 }

@@ -9,6 +9,11 @@ from typing import Any
 SUPPORTED_SCHEMA_VERSION = 1
 SUPPORTED_PROJECT_PROFILES_SCHEMA_VERSION = 1
 DEFAULT_MAX_TEXT_BYTES = 2_000_000
+DEFAULT_CHATGPT_OUT_ROOT = "ai-consult-tools/chatgpt/consult_case"
+DEFAULT_CLAUDE_OUT_ROOT = "ai-consult-tools/claude/consult_case"
+DEFAULT_CHATGPT_MAX_BYTES_PER_PART = 536_870_912
+DEFAULT_CHATGPT_MAX_CHARS_PER_PART = 300_000
+DEFAULT_CLAUDE_MAX_CHARS_PER_PART = 300_000
 DEFAULT_INVENTORY_EXCLUDE_PATHS = (
     ".git",
     "node_modules",
@@ -68,6 +73,55 @@ class InventoryConfig:
 
 
 @dataclass(frozen=True)
+class ChatGPTOutputConfig:
+    out_root: str = DEFAULT_CHATGPT_OUT_ROOT
+    max_bytes_per_part: int = DEFAULT_CHATGPT_MAX_BYTES_PER_PART
+    max_chars_per_part: int = DEFAULT_CHATGPT_MAX_CHARS_PER_PART
+
+    def __post_init__(self) -> None:
+        _validate_repo_relative_path(
+            self.out_root,
+            "outputs.chatgpt.outRoot",
+            allow_trailing_slash=False,
+        )
+        _validate_positive_integer(
+            self.max_bytes_per_part,
+            "outputs.chatgpt.maxBytesPerPart",
+        )
+        _validate_positive_integer(
+            self.max_chars_per_part,
+            "outputs.chatgpt.maxCharsPerPart",
+        )
+
+
+@dataclass(frozen=True)
+class ClaudeOutputConfig:
+    out_root: str = DEFAULT_CLAUDE_OUT_ROOT
+    max_chars_per_part: int = DEFAULT_CLAUDE_MAX_CHARS_PER_PART
+
+    def __post_init__(self) -> None:
+        _validate_repo_relative_path(
+            self.out_root,
+            "outputs.claude.outRoot",
+            allow_trailing_slash=False,
+        )
+        _validate_positive_integer(
+            self.max_chars_per_part,
+            "outputs.claude.maxCharsPerPart",
+        )
+
+
+@dataclass(frozen=True)
+class OutputsConfig:
+    chatgpt: ChatGPTOutputConfig = field(
+        default_factory=ChatGPTOutputConfig
+    )
+    claude: ClaudeOutputConfig = field(
+        default_factory=ClaudeOutputConfig
+    )
+
+
+@dataclass(frozen=True)
 class IncludeSetConfig:
     name: str
     paths: tuple[str, ...]
@@ -109,10 +163,16 @@ class ConsultConfig:
     filters: FilterConfig
     inventory: InventoryConfig = field(default_factory=InventoryConfig)
     include_sets: tuple[IncludeSetConfig, ...] = ()
+    outputs: OutputsConfig = field(default_factory=OutputsConfig)
 
     def __post_init__(self) -> None:
         include_sets = tuple(self.include_sets)
         object.__setattr__(self, "include_sets", include_sets)
+
+        if not isinstance(self.outputs, OutputsConfig):
+            raise ConfigError(
+                "outputs must be an OutputsConfig value"
+            )
 
         if not all(
             isinstance(item, IncludeSetConfig)
@@ -259,7 +319,7 @@ def _validate_repo_relative_path(
     *,
     allow_trailing_slash: bool,
 ) -> None:
-    if not value:
+    if not isinstance(value, str) or not value:
         raise ConfigError(f"{context} must be a non-empty string")
 
     if value != value.strip():
@@ -330,6 +390,67 @@ def _parse_project_profile(
     )
 
 
+def _validate_positive_integer(value: int, context: str) -> None:
+    if type(value) is not int or value <= 0:
+        raise ConfigError(f"{context} must be a positive integer")
+
+
+def _parse_outputs(value: Any) -> OutputsConfig:
+    if value is None:
+        return OutputsConfig()
+
+    if not isinstance(value, dict):
+        raise ConfigError("outputs must be an object")
+
+    _reject_unknown_keys(value, {"chatgpt", "claude"}, "outputs")
+    chatgpt_value = value.get("chatgpt", {})
+    claude_value = value.get("claude", {})
+
+    if not isinstance(chatgpt_value, dict):
+        raise ConfigError("outputs.chatgpt must be an object")
+
+    if not isinstance(claude_value, dict):
+        raise ConfigError("outputs.claude must be an object")
+
+    _reject_unknown_keys(
+        chatgpt_value,
+        {"outRoot", "maxBytesPerPart", "maxCharsPerPart"},
+        "outputs.chatgpt",
+    )
+    _reject_unknown_keys(
+        claude_value,
+        {"outRoot", "maxCharsPerPart"},
+        "outputs.claude",
+    )
+
+    return OutputsConfig(
+        chatgpt=ChatGPTOutputConfig(
+            out_root=chatgpt_value.get(
+                "outRoot",
+                DEFAULT_CHATGPT_OUT_ROOT,
+            ),
+            max_bytes_per_part=chatgpt_value.get(
+                "maxBytesPerPart",
+                DEFAULT_CHATGPT_MAX_BYTES_PER_PART,
+            ),
+            max_chars_per_part=chatgpt_value.get(
+                "maxCharsPerPart",
+                DEFAULT_CHATGPT_MAX_CHARS_PER_PART,
+            ),
+        ),
+        claude=ClaudeOutputConfig(
+            out_root=claude_value.get(
+                "outRoot",
+                DEFAULT_CLAUDE_OUT_ROOT,
+            ),
+            max_chars_per_part=claude_value.get(
+                "maxCharsPerPart",
+                DEFAULT_CLAUDE_MAX_CHARS_PER_PART,
+            ),
+        ),
+    )
+
+
 def _parse_include_sets(value: Any) -> tuple[IncludeSetConfig, ...]:
     if value is None:
         return ()
@@ -397,7 +518,13 @@ def parse_config(payload: Any) -> ConsultConfig:
 
     _reject_unknown_keys(
         payload,
-        {"schemaVersion", "filters", "inventory", "includeSets"},
+        {
+            "schemaVersion",
+            "filters",
+            "inventory",
+            "includeSets",
+            "outputs",
+        },
         "configuration",
     )
 
@@ -474,6 +601,7 @@ def parse_config(payload: Any) -> ConsultConfig:
             exclude_paths=inventory_exclude_paths,
         ),
         include_sets=_parse_include_sets(payload.get("includeSets")),
+        outputs=_parse_outputs(payload.get("outputs")),
     )
 
 
