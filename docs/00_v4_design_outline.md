@@ -537,14 +537,22 @@ V4-6で共通CLIを呼び出す薄いラッパーへ置換する。
 
 ### V4-3 bundle生成
 
-- `start`
-- `review`
-- `inspect`
-- 未追跡ファイル収録
-- 対象パス限定diff
-- 共通manifest
-- `PROJECT_TREE.md`
-- `STRUCTURE_STATUS.md`
+- V4-3A：共通bundle内部モデル（完了）
+- V4-3B：Git差分収集（完了）
+- V4-3C：review bundle共通組立（完了）
+- V4-3D：start bundle共通組立（完了）
+  - V4-3D-1：構造表示コア
+  - V4-3D-2：startファイル収集
+  - V4-3D-3：生成文書
+  - V4-3D-4：`BundleModel(command=start)`への統合
+  - V4-3D-5：統合・境界試験
+- 構造走査は1回だけ実行し、`folder_tree.txt`とJSON構造インデックスを同一snapshotから同期する
+- 生成5文書を固定順で配置し、その後ろに収録ファイル本文を配置する
+- manifestは`BundleItem`から派生する
+- 明示includeだけprofile外を許可し、profile外の構造情報は生成文書へ出さない
+- V4-3D-5完了時の全試験：174件成功、3件skip（Windowsのsymlink作成権限による既存試験）
+- V4-3D-5では実装欠陥は確認されず、試験追加だけを行った
+- モデル別物理出力とCLI接続はV4-4で扱う
 
 ### V4-4 出力アダプター
 
