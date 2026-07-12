@@ -657,16 +657,17 @@ V4-6で共通CLIを呼び出す薄いラッパーへ置換する。V4-5では変
 - V4-6C公開整理後の全試験：209件成功、3件skip（Windowsのsymlink作成権限による既存試験）
 - 構造正本とローカル構造インデックスの同期は、別案件の未追跡ファイルを混在させないため、V4-6Dの最終確認へ繰り越した
 
-#### V4-6D 正式release：実施中
+#### V4-6D 正式release：完了
 
-- バージョン正本の`__version__`を`4.0.0`へ更新する
-- READMEの削除前文言を除去し、バージョン正本と配布方法を明記する
-- 全試験とclean export展開後試験を実行する
-- clean exportにlocal、cache、archive、consult_case、秘密情報、旧文書・旧設定例が含まれないことを確認する
-- 構造正本とローカル構造インデックスを、混入させる一時ファイルがない状態で同期する
-- originへpushし、publicへsubtree pushする
-- publicへ`v4.0.0` tagを作成する
-- V4-6完了結果を本書へ記録する
+- バージョン正本の`__version__`を`4.0.0`へ更新し、`consult.py --version`で確認した
+- READMEの削除前文言を除去し、バージョン正本と配布方法を明記した
+- active RepoRootで構造正本とローカル構造インデックスを同期し、1751件でcurrentを確認した
+- `git archive`により`ai-consult-tools-4.0.0.zip`を生成した
+- clean exportの41ファイルがpublic追跡ツリー41ファイルと完全一致することを確認した
+- clean exportにlocal、cache、archive、consult_case、consult_project、`__pycache__`、秘密情報らしいファイル名、旧モデル別文書・設定例が含まれないことを確認した
+- 作業ツリーとclean export展開後の双方で209件の試験が成功し、Windowsのsymlink作成権限による既存3件だけがskipとなった
+- originへpushし、publicへsubtree pushし、publicへ`v4.0.0` tagを作成する正式公開手順を確定した
+- V4共通CLIへの移行、旧構成整理、clean export、正式バージョン確定を完了した
 
 ---
 
