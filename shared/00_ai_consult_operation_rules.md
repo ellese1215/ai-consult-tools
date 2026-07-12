@@ -2,7 +2,7 @@
 
 > File: `shared/00_ai_consult_operation_rules.md`
 > Updated: 2026-07-11
-> Status: AI相談運用基盤v4運用中。正式バージョンはV4-6で確定する。
+> Status: AI相談運用基盤v4.0.0運用中。
 
 ## 1. この文書の役割
 

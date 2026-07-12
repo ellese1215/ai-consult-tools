@@ -400,6 +400,8 @@ MANIFEST.csv
 
 ## 10. v4のファイル構成
 
+以下はV4設計開始時点の計画構成であり、正式版の現行構成ではない。現行構成は`README.md`および実際の追跡ツリーを参照する。
+
 ```text
 ai-consult-tools/
 ├─ README.md
