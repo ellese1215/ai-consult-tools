@@ -1,11 +1,11 @@
-# AI相談運用基盤 v4 現行技術仕様
+# AI相談運用基盤 現行技術仕様
 
 > File: `docs/01_current_spec.md`
 > Updated: 2026-07-11
 
 ## 1. この文書の役割
 
-本書は、AI相談運用基盤v4の共通CLI、設定、構造管理、bundle、物理出力の現行技術仕様を定義する。
+本書は、AI相談運用基盤の共通CLI、設定、構造管理、bundle、物理出力の現行技術仕様を定義する。
 
 文書の役割は以下のように分離する。
 
@@ -14,7 +14,6 @@
 | `README.md` | 公開入口、導入、基本的な利用方法 |
 | `shared/00_ai_consult_operation_rules.md` | 相談、合意、変更、確認の運用ルール |
 | 本書 | 現行技術仕様 |
-| `docs/00_v4_design_outline.md` | V4移行計画、設計背景、フェーズ履歴 |
 | `shared/SECURITY.md` | 除外、機密情報、生成物の取扱い |
 | `local/consult.local.md` | 個別環境のローカル情報 |
 
@@ -138,12 +137,13 @@ python ai-consult-tools/consult.py start \
 ```
 
 - 対象プロジェクトの開始用bundleを生成する
-- `--include-set`は複数回指定できる
-- `--include-paths`はRepoRoot相対の明示対象を指定する
+- `--include-set`は複数回指定でき、設定済みの共通資料をプロファイル外からも収集できる
+- `--include-paths`はRepoRoot相対かつ選択プロファイル内の明示対象だけを指定できる
 - bundle収集前に現在構造を1回走査する
 - 同一snapshotから`folder_tree.txt`とローカル構造インデックスを必要に応じて同期する
 - 同期前の状態、構造差分、同期結果を`STRUCTURE_STATUS.md`へ記録する
 - 対象プロジェクトの同期後の最新構造情報を生成文書へ収録する
+- `PROJECT_TREE.md`には選択プロファイルの`scopeRoots`だけを収録する
 - 明示対象の解決結果、除外、不足、失敗を`PATH_INDEX.md`と`SKIPPED.md`へ記録する
 
 ### 3.6 `review`
@@ -254,6 +254,8 @@ python ai-consult-tools/consult.py review \
 `scopeRoots`はRepoRoot相対、`/`区切り、末尾`/`なしとする。空文字、絶対パス、`.`、`..`、同一プロファイル内の重複を拒否する。
 
 対象パスが`scopeRoot`と一致するか、`scopeRoot + "/"`で始まる場合にプロファイル所属と判定する。
+
+`start`では、任意指定の`--include-paths`にこの所属判定を適用する。設定管理された`--include-set`は共通資料を複数プロファイルで共有するため所属判定をまたげるが、RepoRoot外のパスやリンク先は従来どおり拒否する。構造生成文書の対象は常に選択プロファイルの`scopeRoots`だけとする。
 
 ---
 
@@ -533,7 +535,7 @@ WARNING: legacy entry point; use ai-consult-tools/consult.py for new commands.
 | `include` | `start` | `--include-set`と`--include-paths`の明示対象 |
 | `diff` | `review` | 現行契約のstaged、unstaged、未追跡 |
 
-`--case-name`とV4共通schemaの`--config-path`は現行CLIへ転送する。ChatGPT版`include`の`--include-set`は維持する。Claude旧入口では`--include-set`を維持しない。
+`--case-name`と共通schemaの`--config-path`は現行CLIへ転送する。ChatGPT版`include`の`--include-set`は維持する。Claude旧入口では`--include-set`を維持しない。
 
 `include`は少なくとも1件の`--include-set`または`--include-paths`を必要とする。include指定を他モードへ付けた場合は拒否する。include pathはRepoRoot相対かつ`/`区切りとし、絶対パスを受理しない。
 

@@ -1,6 +1,13 @@
 {
   "schemaVersion": 1,
   "profiles": {
+    "arcane_eriya": {
+      "scopeRoots": [
+        "apps/games/arcane_warmaiden_eriya",
+        "apps/games/arcane_warmaiden_eriya_trial",
+        "docs/arcane_eriya"
+      ]
+    },
     "pavilion_ellese": {
       "scopeRoots": [
         "apps/webs/pavilion-ellese",
@@ -10,8 +17,7 @@
         "packages/ts/web",
         "packages/styles/web/pavilion-ellese",
         "db",
-        "docs/pavilion-ellese",
-        "docs/projectFiles/エリーゼの館"
+        "docs/pavilion-ellese"
       ]
     },
     "tax_ledger": {

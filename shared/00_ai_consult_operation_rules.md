@@ -2,7 +2,7 @@
 
 > File: `shared/00_ai_consult_operation_rules.md`
 > Updated: 2026-07-11
-> Status: AI相談運用基盤v4.0.0運用中。
+> Status: 現行運用中。
 
 ## 1. この文書の役割
 
@@ -16,7 +16,6 @@
 | 共通運用 | 本書 |
 | 現行技術仕様 | `docs/01_current_spec.md` |
 | セキュリティ | `shared/SECURITY.md` |
-| V4移行計画・履歴 | `docs/00_v4_design_outline.md` |
 | ローカル環境情報 | `local/consult.local.md` |
 | プロジェクト固有仕様 | 各プロジェクトの正本仕様書 |
 | 現行動作の検証根拠 | 実装、試験、必要に応じて実DB |

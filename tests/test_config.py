@@ -437,12 +437,21 @@ class ProjectProfilesConfigTest(unittest.TestCase):
             tuple(profile.name for profile in config.profiles),
             (
                 "ai_consult_tools",
+                "arcane_eriya",
                 "pavilion_ellese",
                 "tax_ledger",
             ),
         )
+        self.assertEqual(
+            config.get("arcane_eriya").scope_roots,
+            (
+                "apps/games/arcane_warmaiden_eriya",
+                "apps/games/arcane_warmaiden_eriya_trial",
+                "docs/arcane_eriya",
+            ),
+        )
         self.assertIn(
-            "docs/projectFiles/エリーゼの館",
+            "docs/pavilion-ellese",
             config.get("pavilion_ellese").scope_roots,
         )
 

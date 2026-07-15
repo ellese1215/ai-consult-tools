@@ -540,7 +540,7 @@ class StartFileCollectionTest(unittest.TestCase):
                 explicit_paths=("../outside.md",),
             )
 
-    def test_include_set_stays_in_profile_and_explicit_can_cross_it(self) -> None:
+    def test_include_set_can_cross_profile_and_explicit_stays_in_it(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             (repo / "project").mkdir()
@@ -583,14 +583,14 @@ class StartFileCollectionTest(unittest.TestCase):
         )
         self.assertEqual(
             tuple(item.origin for item in snapshot.items),
-            (BundleOrigin.INCLUDE_SET, BundleOrigin.EXPLICIT),
+            (BundleOrigin.INCLUDE_SET, BundleOrigin.INCLUDE_SET),
         )
         self.assertEqual(
             tuple(item.status for item in snapshot.path_resolutions),
             (
                 CollectionStatus.INCLUDED,
-                CollectionStatus.EXCLUDED,
                 CollectionStatus.INCLUDED,
+                CollectionStatus.EXCLUDED,
             ),
         )
         self.assertEqual(len(snapshot.skipped_items), 1)
@@ -708,12 +708,11 @@ class StartFileCollectionTest(unittest.TestCase):
         self.assertIs(snapshot.items[0].origin, BundleOrigin.EXPLICIT)
         self.assertEqual(len(snapshot.skipped_items), 1)
 
-    def test_include_set_cannot_escape_profile_through_resolved_target(self) -> None:
+    def test_explicit_path_cannot_escape_profile_through_resolved_target(self) -> None:
         source = b"secret"
         request = StartFileRequest(
             requested_path="project/link.md",
-            origin=BundleOrigin.INCLUDE_SET,
-            include_set_name="common",
+            origin=BundleOrigin.EXPLICIT,
         )
         result = self.included_result(
             request,
@@ -1217,29 +1216,33 @@ class StartBundleAssemblyTest(unittest.TestCase):
             ),
             (
                 CollectionStatus.INCLUDED,
+                CollectionStatus.INCLUDED,
+                CollectionStatus.INCLUDED,
                 CollectionStatus.EXCLUDED,
-                CollectionStatus.INCLUDED,
-                CollectionStatus.INCLUDED,
-                CollectionStatus.INCLUDED,
+                CollectionStatus.EXCLUDED,
             ),
         )
         self.assertEqual(
             tuple(item.relative_path for item in bundle.skipped_items),
-            ("outside/shared.txt",),
+            ("outside/shared.txt", "outside/shared.txt"),
         )
         self.assertEqual(
             tuple(item.relative_path for item in bundle.items[5:]),
             ("project/inside.txt", "outside/shared.txt"),
         )
         self.assertIs(bundle.items[5].origin, BundleOrigin.INCLUDE_SET)
-        self.assertIs(bundle.items[6].origin, BundleOrigin.EXPLICIT)
+        self.assertIs(bundle.items[6].origin, BundleOrigin.INCLUDE_SET)
         self.assertIn(
             "duplicate request; content already included by "
             "include-set:common",
             bundle.path_resolutions[2].reason or "",
         )
         self.assertIn(
-            "duplicate request; content already included by include-paths",
+            "include-paths path is outside project profile",
+            bundle.path_resolutions[3].reason or "",
+        )
+        self.assertIn(
+            "include-paths path is outside project profile",
             bundle.path_resolutions[4].reason or "",
         )
 
@@ -1251,7 +1254,7 @@ class StartBundleAssemblyTest(unittest.TestCase):
         self.assertIn("Source: `include-set:common`", path_index)
         self.assertIn("Source: `include-paths`", path_index)
         self.assertIn("outside project profile", path_index)
-        self.assertEqual(path_index.count("duplicate request"), 2)
+        self.assertEqual(path_index.count("duplicate request"), 1)
 
         manifest = render_manifest_csv(bundle)
         self.assertEqual(
@@ -1259,9 +1262,95 @@ class StartBundleAssemblyTest(unittest.TestCase):
             1,
         )
         self.assertEqual(
-            manifest.count("outside/shared.txt,text,explicit"),
+            manifest.count("outside/shared.txt,text,include_set"),
             1,
         )
+
+    def test_arcane_common_rules_cross_profile_but_tree_does_not(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            roots = (
+                "apps/games/arcane_warmaiden_eriya",
+                "apps/games/arcane_warmaiden_eriya_trial",
+                "docs/arcane_eriya",
+            )
+            for root in roots:
+                (repo / root).mkdir(parents=True)
+
+            arcane_doc = repo / "docs/arcane_eriya/game_rules.md"
+            shared_rule = (
+                repo
+                / "ai-consult-tools/shared/00_ai_consult_operation_rules.md"
+            )
+            local_rule = repo / "ai-consult-tools/local/consult.local.md"
+            outside_doc = repo / "docs/other/note.md"
+            shared_rule.parent.mkdir(parents=True)
+            local_rule.parent.mkdir(parents=True)
+            outside_doc.parent.mkdir(parents=True)
+            arcane_doc.write_text("arcane\n", encoding="utf-8")
+            shared_rule.write_text("shared\n", encoding="utf-8")
+            local_rule.write_text("local\n", encoding="utf-8")
+            outside_doc.write_text("outside\n", encoding="utf-8")
+
+            config = ConsultConfig(
+                schema_version=1,
+                filters=FilterConfig(),
+                include_sets=(
+                    IncludeSetConfig(
+                        name="common_rules",
+                        paths=(
+                            "ai-consult-tools/shared/"
+                            "00_ai_consult_operation_rules.md",
+                            "ai-consult-tools/local/consult.local.md",
+                        ),
+                    ),
+                ),
+            )
+            bundle = collect_start_bundle(
+                repo,
+                config,
+                ProjectProfile(name="arcane_eriya", scope_roots=roots),
+                include_set_names=("common_rules",),
+                explicit_paths=(
+                    "docs/arcane_eriya/game_rules.md",
+                    "docs/other/note.md",
+                ),
+            )
+
+        self.assertEqual(
+            tuple(item.relative_path for item in bundle.items[5:]),
+            (
+                "ai-consult-tools/shared/00_ai_consult_operation_rules.md",
+                "ai-consult-tools/local/consult.local.md",
+                "docs/arcane_eriya/game_rules.md",
+            ),
+        )
+        self.assertEqual(
+            tuple(resolution.status for resolution in bundle.path_resolutions),
+            (
+                CollectionStatus.INCLUDED,
+                CollectionStatus.INCLUDED,
+                CollectionStatus.INCLUDED,
+                CollectionStatus.EXCLUDED,
+            ),
+        )
+        self.assertFalse(
+            any(
+                "outside project profile" in (resolution.reason or "")
+                for resolution in bundle.path_resolutions[:2]
+            )
+        )
+        project_tree = next(
+            item.content
+            for item in bundle.items
+            if item.relative_path == PROJECT_TREE_PATH
+        )
+        self.assertEqual(project_tree.count("  - `"), 3)
+        for root in roots:
+            self.assertIn(f"  - `{root}`", project_tree)
+        self.assertNotIn("ai-consult-tools/shared", project_tree)
+        self.assertNotIn("ai-consult-tools/local", project_tree)
+        self.assertNotIn("docs/other", project_tree)
 
     def test_collection_failures_reach_path_index_skipped_and_manifest(
         self,
@@ -1596,7 +1685,7 @@ class StartBundleAssemblyTest(unittest.TestCase):
 
         self.assertEqual(scan.call_count, 1)
 
-    def test_explicit_folder_tree_is_collected_after_sync(self) -> None:
+    def test_include_set_folder_tree_is_collected_after_sync(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             source = repo / "project" / "main.txt"
@@ -1608,12 +1697,18 @@ class StartBundleAssemblyTest(unittest.TestCase):
                 ConsultConfig(
                     schema_version=1,
                     filters=FilterConfig(),
+                    include_sets=(
+                        IncludeSetConfig(
+                            name="structure",
+                            paths=("folder_tree.txt",),
+                        ),
+                    ),
                 ),
                 ProjectProfile(
                     name="project",
                     scope_roots=("project",),
                 ),
-                explicit_paths=("folder_tree.txt",),
+                include_set_names=("structure",),
             )
 
         folder_tree_item = next(
@@ -1621,7 +1716,7 @@ class StartBundleAssemblyTest(unittest.TestCase):
             for item in bundle.items
             if item.relative_path == "folder_tree.txt"
         )
-        self.assertIs(folder_tree_item.origin, BundleOrigin.EXPLICIT)
+        self.assertIs(folder_tree_item.origin, BundleOrigin.INCLUDE_SET)
         self.assertIn("project/\n", folder_tree_item.content)
         self.assertIn("project/main.txt\n", folder_tree_item.content)
 
@@ -1643,12 +1738,18 @@ class StartBundleAssemblyTest(unittest.TestCase):
                     ConsultConfig(
                         schema_version=1,
                         filters=FilterConfig(),
+                        include_sets=(
+                            IncludeSetConfig(
+                                name="collision",
+                                paths=(PATH_INDEX_PATH,),
+                            ),
+                        ),
                     ),
                     ProjectProfile(
                         name="project",
                         scope_roots=("project",),
                     ),
-                    explicit_paths=(PATH_INDEX_PATH,),
+                    include_set_names=("collision",),
                 )
 
     def test_structure_sync_failure_aborts_bundle(self) -> None:

@@ -921,7 +921,7 @@ def collect_start_files(
     results: list[CollectionResult] = []
 
     for request in requests:
-        if request.origin is BundleOrigin.INCLUDE_SET:
+        if request.origin is BundleOrigin.EXPLICIT:
             if not profile.contains(request.requested_path):
                 results.append(
                     CollectionResult(
@@ -1047,7 +1047,7 @@ def build_start_collection_snapshot(
                 "included collection metadata is inconsistent"
             )
 
-        if request.origin is BundleOrigin.INCLUDE_SET and (
+        if request.origin is BundleOrigin.EXPLICIT and (
             not profile.contains(collected.relative_path)
             or not profile.contains(collected.real_relative_path)
         ):
@@ -1497,7 +1497,7 @@ def _outside_profile_reason(
     real_relative_path: str | None = None,
 ) -> str:
     reason = (
-        "include-set path is outside project profile: "
+        "include-paths path is outside project profile: "
         f"profile={profile.name}; path={relative_path}"
     )
 
