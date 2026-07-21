@@ -13,6 +13,7 @@
 |---|---|
 | `README.md` | 公開入口、導入、基本的な利用方法 |
 | `shared/00_ai_consult_operation_rules.md` | 相談、合意、変更、確認の運用ルール |
+| `shared/02_consult_template.md` | Work・Codex・review・handoffの最小テンプレート |
 | 本書 | 現行技術仕様 |
 | `shared/SECURITY.md` | 除外、機密情報、生成物の取扱い |
 | `local/consult.local.md` | 個別環境のローカル情報 |
