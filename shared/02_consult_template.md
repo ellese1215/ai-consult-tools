@@ -2,7 +2,7 @@
 
 > File: `shared/02_consult_template.md`
 > Updated: 2026-07-21
-> Rules revision: 20260721-simplified
+> Rules revision: 20260721-simplified-r1
 
 必要な形式を一つだけ選び、空欄と不要な項目は削除する。
 
@@ -47,13 +47,13 @@ Codexがリポジトリを読める場合はbundleを添付しない。読めな
 ```markdown
 # <project> implementation review
 
-- Base: <commit>
-- Target: <commit>
+- Base HEAD: <commit>
+- Target state: <review bundle名 / worktree状態>
 - Review bundle: <latest bundle>
 - Requirements / acceptance criteria: <条件>
 - Focus: <重点確認事項>
 
-baseからtargetまでだけをレビューし、問題がなければ「承認」、問題があれば同じCodexへ戻せる番号付き修正事項を提示してください。
+最初に`DIFF_INDEX.md`、`SKIPPED.md`、`MANIFEST.csv`を確認してください。skipまたは収録不足が結論に影響する場合は承認せず、不足を番号付き修正事項として示してください。Base HEADに対するTarget stateだけをレビューし、問題がなければ「承認」、問題があれば同じCodexへ戻せる番号付き修正事項を提示してください。
 ```
 
 最新review bundle一つだけを添付する。start bundle、旧review bundle、通常ログは添付しない。

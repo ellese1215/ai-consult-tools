@@ -1,7 +1,7 @@
 # AI相談運用基盤 現行技術仕様
 
 > File: `docs/01_current_spec.md`
-> Updated: 2026-07-11
+> Updated: 2026-07-21
 
 ## 1. この文書の役割
 
