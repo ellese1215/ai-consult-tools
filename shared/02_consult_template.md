@@ -1,8 +1,8 @@
 # AI相談用・最小テンプレート
 
 > File: `shared/02_consult_template.md`
-> Updated: 2026-07-21
-> Rules revision: 20260721-simplified-r1
+> Updated: 2026-07-22
+> Rules revision: 20260722-simplified-r2
 
 必要な形式を一つだけ選び、空欄と不要な項目は削除する。
 
