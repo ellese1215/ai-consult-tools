@@ -22,6 +22,7 @@ from ai_consult.collection import (
 )
 from ai_consult.config import ConsultConfig, ProjectProfile
 from ai_consult.inventory import (
+    FOLDER_TREE_FILENAME,
     FolderTreeComparison,
     InventoryError,
     InventoryEntry,
@@ -34,6 +35,7 @@ from ai_consult.inventory import (
     STRUCTURE_INDEX_RELATIVE_PATH,
     compare_folder_tree,
     compare_structure_index,
+    render_folder_tree,
     sync_folder_tree,
     sync_structure_index,
 )
@@ -1294,6 +1296,21 @@ def build_start_generated_items(
     )
 
 
+def build_folder_tree_item(snapshot: InventorySnapshot) -> BundleItem:
+    _require_type(snapshot, InventorySnapshot, "snapshot")
+    content = render_folder_tree(snapshot)
+    source = content.encode("utf-8")
+    return BundleItem(
+        relative_path=FOLDER_TREE_FILENAME,
+        content_kind=ContentKind.TEXT,
+        origin=BundleOrigin.GENERATED,
+        content=content,
+        encoding="utf-8",
+        source_bytes=len(source),
+        source_sha256=hashlib.sha256(source).hexdigest(),
+    )
+
+
 def collect_start_bundle(
     repo_root: str | Path,
     config: ConsultConfig,
@@ -1352,8 +1369,9 @@ def collect_start_bundle(
             structure_status,
             collection_snapshot,
         )
+        folder_tree_item = build_folder_tree_item(inventory_snapshot)
         items = _merge_start_items(
-            generated_items,
+            (*generated_items, folder_tree_item),
             collection_snapshot.items,
         )
     except (
@@ -1395,12 +1413,21 @@ def _merge_start_items(
         )
 
     seen: dict[str, BundleItem] = {}
+    merged: list[BundleItem] = []
 
     for item in (*generated, *collected):
         folded = item.relative_path.casefold()
         previous = seen.get(folded)
 
         if previous is not None:
+            if (
+                folded == FOLDER_TREE_FILENAME.casefold()
+                and previous.origin is BundleOrigin.GENERATED
+                and item.origin
+                in {BundleOrigin.EXPLICIT, BundleOrigin.INCLUDE_SET}
+            ):
+                continue
+
             raise StartBundleAssemblyError(
                 "start bundle item path collision: "
                 f"{previous.relative_path} ({previous.origin.value}) and "
@@ -1408,8 +1435,9 @@ def _merge_start_items(
             )
 
         seen[folded] = item
+        merged.append(item)
 
-    return generated + collected
+    return tuple(merged)
 
 
 def _inline_text(value: str) -> str:

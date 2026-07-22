@@ -26,6 +26,7 @@ from ai_consult.path_resolver import (
 
 class CollectionStatus(str, Enum):
     INCLUDED = "included"
+    NO_CHANGES = "no_changes"
     EXCLUDED = "excluded"
     MISSING = "missing"
     OUTSIDE_REPO = "outside_repo"

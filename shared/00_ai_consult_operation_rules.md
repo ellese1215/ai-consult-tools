@@ -2,7 +2,7 @@
 
 > File: `shared/00_ai_consult_operation_rules.md`
 > Updated: 2026-07-22
-> Rules revision: 20260722-simplified-r2
+> Rules revision: 20260722-simplified-r4
 > Scope: Chat / Work / Codexによる仕様検討、実装、レビュー、引き継ぎ
 
 ## 1. 正本
@@ -75,6 +75,8 @@ Chatで自由検討（任意）
 - stage、commit、pushなど状態を変える工程は必要に応じて分け、直前の結果を確認してから次へ進む。
 - 失敗時は原因を確認し、原因未確認のまま同種の巨大コマンドを繰り返さない。
 - 外部スクリプトを配布する場合は、対象環境で安全に読める文字コードと構文であることを配布前に確認する。
+- 正本文書にある標準CLIで完了できる処理は、そのCLIを直接提示する。状態検査、設定ファイル生成、ZIP検査などを重ねた独自wrapperへ置き換えない。
+- 追加検査は、標準CLIで実際に障害が発生し、その原因を切り分ける場合だけ、必要最小限の診断として提示する。
 
 ### 3.2 スレッド／タスクの立て直し
 
@@ -114,7 +116,10 @@ STRUCTURE_STATUS.md
 PATH_INDEX.md
 SKIPPED.md
 MANIFEST.csv
+folder_tree.txt
 ```
+
+`folder_tree.txt`は、AIとユーザーがRepoRoot内のパスを確認するための補助資料である。`start`は現在構造から再生成した同ファイルをbundleへ自動収録する。ただし、同期前の鮮度、存在、形式、生成前後のハッシュ不変をbundle生成の合否条件にしない。
 
 ### 4.2 start bundle生成コマンド
 
@@ -137,6 +142,16 @@ python .\ai-consult-tools\consult.py start `
 ```
 
 実際の引き継ぎでは、プレースホルダーを実在値へ置換し、存在しないパスと不要な行を削除した、実行可能なコマンド全文を提示する。
+
+この標準コマンドは`consult.py start`を直接一度実行する一実行単位とする。
+
+- `structure check`または手動の`structure sync`をstartの必須前処理にしない。
+- `start`自身が現在構造を一度走査し、`folder_tree.txt`とローカル構造インデックスを必要に応じて再生成する。古い、欠落、形式不正の`folder_tree.txt`は同期対象であり、bundle生成の停止理由ではない。
+- 同期後の`folder_tree.txt`をパス案内資料としてbundleへ自動収録する。手動の`--include-paths`または`--include-set`指定は不要である。
+- `folder_tree.txt`が更新されることは正常な同期結果である。生成前後のハッシュ一致、内容不変、worktree状態の完全一致を要求しない。
+- プロファイル外の共通資料が必要な場合は、実在する設定済み`--include-set`を指定する。その場で一時設定ファイルを作るwrapperは提示しない。
+- ZIP内部、`MANIFEST.csv`、`SKIPPED.md`など、CLI自身が保証する生成処理をPowerShellで再実装・重複検査しない。実際のCLI障害を診断する場合だけ、問題箇所へ限定して確認する。
+- 正常終了、`start: created`、`output:`で示された成果物を標準の成功条件とする。
 
 ChatGPT向けZIPの標準出力先：
 
@@ -161,6 +176,8 @@ python .\ai-consult-tools\consult.py review `
 ```
 
 Git変更として確認できる対象パスだけを指定する。削除済みファイルは削除前のRepoRoot相対パスを指定する。review時にstart bundleを作り直さない。
+
+明示した`--target-paths`は、収録項目または`SKIPPED.md`のいずれかで結果を確認できなければならない。Git管理外かつignore対象のローカルファイルも、ファイルパスを完全一致で明示した場合だけ未追跡項目として収録する。ignore対象ディレクトリを指定しても、その配下を再帰的に収録しない。変更がない対象は`no_changes`、存在せずGit変更もない対象は`missing`として`SKIPPED.md`へ記録する。
 
 ## 5. 引き継ぎ文
 

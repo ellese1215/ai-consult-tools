@@ -401,6 +401,104 @@ class GitDiffCollectorTest(unittest.TestCase):
             self.assertEqual(snapshot.skipped_items, ())
             self.assertNotIn("other/out.txt", snapshot.items[0].content)
 
+    def test_exact_ignored_file_target_is_included_without_siblings(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = GitRepository(Path(temp_dir))
+            repo.write_text(".gitignore", "app/local/\n")
+            repo.write_text("app/tracked.txt", "tracked\n")
+            repo.commit_all("base")
+            repo.write_text("app/local/config.json", "{\"ok\": true}\n")
+            repo.write_text("app/local/secret.env", "SECRET=value\n")
+
+            snapshot = GitDiffCollector(
+                repo.root,
+                make_config(),
+                make_profile("app"),
+                target_paths=("app/local/config.json",),
+            ).collect()
+
+            self.assertEqual(snapshot.staged_items, ())
+            self.assertEqual(snapshot.unstaged_items, ())
+            self.assertEqual(len(snapshot.untracked_items), 1)
+            item = snapshot.untracked_items[0]
+            self.assertEqual(
+                item.relative_path,
+                "app/local/config.json",
+            )
+            self.assertEqual(item.content, "{\"ok\": true}\n")
+            self.assertNotIn("SECRET=value", item.content)
+            self.assertEqual(snapshot.skipped_items, ())
+
+    def test_ignored_directory_target_does_not_expand_private_files(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = GitRepository(Path(temp_dir))
+            repo.write_text(".gitignore", "app/local/\n")
+            repo.write_text("app/tracked.txt", "tracked\n")
+            repo.commit_all("base")
+            repo.write_text("app/local/secret.env", "SECRET=value\n")
+
+            snapshot = GitDiffCollector(
+                repo.root,
+                make_config(),
+                make_profile("app"),
+                target_paths=("app/local",),
+            ).collect()
+
+            self.assertEqual(snapshot.items, ())
+            self.assertEqual(len(snapshot.skipped_items), 1)
+            self.assertEqual(
+                snapshot.skipped_items[0].status,
+                CollectionStatus.NO_CHANGES,
+            )
+            self.assertNotIn(
+                "SECRET=value",
+                snapshot.skipped_items[0].reason,
+            )
+
+    def test_explicit_unchanged_target_is_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = GitRepository(Path(temp_dir))
+            repo.write_text("app/file.txt", "unchanged\n")
+            repo.commit_all("base")
+
+            snapshot = GitDiffCollector(
+                repo.root,
+                make_config(),
+                make_profile("app"),
+                target_paths=("app/file.txt",),
+            ).collect()
+
+            self.assertEqual(snapshot.items, ())
+            self.assertEqual(len(snapshot.skipped_items), 1)
+            skipped = snapshot.skipped_items[0]
+            self.assertEqual(
+                skipped.status,
+                CollectionStatus.NO_CHANGES,
+            )
+            self.assertEqual(skipped.origin, BundleOrigin.EXPLICIT)
+            self.assertEqual(skipped.requested_path, "app/file.txt")
+
+    def test_explicit_missing_target_is_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = GitRepository(Path(temp_dir))
+
+            snapshot = GitDiffCollector(
+                repo.root,
+                make_config(),
+                make_profile("app"),
+                target_paths=("app/missing.txt",),
+            ).collect()
+
+            self.assertEqual(snapshot.items, ())
+            self.assertEqual(len(snapshot.skipped_items), 1)
+            skipped = snapshot.skipped_items[0]
+            self.assertEqual(skipped.status, CollectionStatus.MISSING)
+            self.assertEqual(skipped.requested_path, "app/missing.txt")
+
     def test_untracked_binary_is_skipped_without_body(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = GitRepository(Path(temp_dir))

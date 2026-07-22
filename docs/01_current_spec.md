@@ -126,6 +126,8 @@ python ai-consult-tools/consult.py structure check
 - 未生成、古い、形式不正なら終了コード1
 - 走査・読込エラーなら終了コード2
 
+終了コード1は構造資料の診断結果であり、`start`が実行不能であることを示さない。`structure check`をstartの必須前処理または停止条件にしてはならない。
+
 ### 3.5 `start`
 
 ```text
@@ -142,10 +144,13 @@ python ai-consult-tools/consult.py start \
 - `--include-paths`はRepoRoot相対かつ選択プロファイル内の明示対象だけを指定できる
 - bundle収集前に現在構造を1回走査する
 - 同一snapshotから`folder_tree.txt`とローカル構造インデックスを必要に応じて同期する
+- 同期前の`folder_tree.txt`または構造インデックスが未生成、古い、形式不正でも、同期可能であれば生成を継続する
+- 同期後の`folder_tree.txt`を`generated`由来のパス案内資料としてbundleへ自動収録する
 - 同期前の状態、構造差分、同期結果を`STRUCTURE_STATUS.md`へ記録する
 - 対象プロジェクトの同期後の最新構造情報を生成文書へ収録する
 - `PROJECT_TREE.md`には選択プロファイルの`scopeRoots`だけを収録する
 - 明示対象の解決結果、除外、不足、失敗を`PATH_INDEX.md`と`SKIPPED.md`へ記録する
+- 外部wrapperによる事前の`structure check`、一時設定生成、`folder_tree.txt`のハッシュ不変確認、ZIP内部の重複検証を標準契約に含めない
 
 ### 3.6 `review`
 
@@ -159,6 +164,8 @@ python ai-consult-tools/consult.py review \
 
 - 対象プロジェクト内のstaged、unstaged、未追跡を区別して収集する
 - `--target-paths`でレビュー対象をRepoRoot相対パスへ限定できる
+- ignore対象ファイルは完全なファイルパスを明示した場合だけ未追跡項目として収録し、ignore対象ディレクトリを再帰展開しない
+- 各明示対象は収録項目または`SKIPPED.md`へ記録し、変更なしは`no_changes`、不存在かつGit変更なしは`missing`とする
 - renameは現在パスと`previous_path`を保持する
 - 変更もskipもない場合は成果物を作らず`review: no changes`で終了する
 - 収録項目がなくてもskipが存在する場合は成果物を生成する
@@ -194,6 +201,9 @@ python ai-consult-tools/consult.py review \
     "common_rules": [
       "ai-consult-tools/shared/00_ai_consult_operation_rules.md",
       "ai-consult-tools/local/consult.local.md"
+    ],
+    "repository_structure": [
+      "docs/REPOSITORY_STRUCTURE.md"
     ]
   },
   "outputs": {
@@ -264,6 +274,7 @@ python ai-consult-tools/consult.py review \
 
 ### 6.1 `folder_tree.txt`
 
+- RepoRoot内のパスを確認するための補助資料
 - UTF-8 BOMなし
 - LF
 - RepoRoot相対
@@ -272,6 +283,10 @@ python ai-consult-tools/consult.py review \
 - 決定的ソート
 - 構造が変わった場合だけ更新
 - 手動編集禁止
+- `start`が必要に応じて再生成する
+- `start`が同期後の内容をパス案内資料としてbundleへ自動収録する
+- 手動のinclude指定は不要
+- 鮮度、存在、形式、生成前後のハッシュ不変をbundle生成の合否条件にしない
 
 ### 6.2 ローカル構造インデックス
 
@@ -363,6 +378,8 @@ MANIFEST.csv
 | `PATH_INDEX.md` | include要求と解決結果 |
 | `SKIPPED.md` | 除外、不足、失敗理由 |
 | `MANIFEST.csv` | 収録項目一覧 |
+
+同期後の`folder_tree.txt`は、上記固定文書とは別の通常content itemとして`parts/snapshot_docs_part_<NNN>.md`へ収録し、`MANIFEST.csv`では`origin=generated`として記録する。
 
 ### 7.5 `review`生成文書
 

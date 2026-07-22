@@ -31,6 +31,13 @@
 | stage、commit、pushの分割と確認境界 | `<separate units and explicit approvals>` |
 | push後のlocal／remote照合 | `<comparison method>` |
 | subtree、公開remote、deployの停止条件 | `<stop conditions>` |
+| bundle生成の標準形 | `<direct consult.py start command>` |
+| folder_tree.txtの位置づけ | `<navigation aid; start regenerates and includes it without using freshness as a gate>` |
+| start前の構造確認 | `<not a required gate>` |
+| `.Count`参照対象の配列化 | `<wrap the whole producing expression or pipeline in an array construct>` |
+| native command終了コード確認 | `<check immediately after every native command before using its output>` |
+| 単一行出力の確認 | `<arrayize, require exactly one non-empty line, then read index 0>` |
+| プレースホルダーの扱い | `<never present placeholders as directly executable commands>` |
 
 コマンド全文は実行前提と確認方法を含む一括コピー可能な単位で提示し、状態を変える工程は直前の結果と必要な確認を経てから進める。
 
@@ -62,17 +69,23 @@ python ai-consult-tools/consult.py structure check
 python ai-consult-tools/consult.py find <query> --profile <name>
 ```
 
+`structure sync`と`structure check`は、bundleを生成せず構造資料を保守・診断する場合に使用する。`structure check`のstale結果を`start`の停止条件にしない。
+
 ### 相談開始
 
 ```text
 python ai-consult-tools/consult.py start --target <chatgpt|claude> --profile <name> --case-name <case> --include-set common_rules --include-paths <path>...
 ```
 
+`start`は上記CLIを直接実行する。独自wrapperで事前の`structure check`、一時設定生成、`folder_tree.txt`のハッシュ不変確認、ZIP内部の再検証を追加しない。`start`による`folder_tree.txt`の再生成とbundleへの自動収録は正常な同期結果として扱う。
+
 ### レビュー
 
 ```text
 python ai-consult-tools/consult.py review --target <chatgpt|claude> --profile <name> --case-name <case> --target-paths <path>...
 ```
+
+ignore対象のローカルファイルをreviewする場合は、必要なファイルの完全相対パスだけを明示する。ignore対象ディレクトリ配下を自動収集させない。各明示対象が収録項目または`SKIPPED.md`のどちらへ出たかを確認する。
 
 相談ごとの長いファイル一覧や完了済みPhaseのコマンドは、この文書へ蓄積しません。
 

@@ -290,6 +290,10 @@ class ConfigTest(unittest.TestCase):
                 "ai-consult-tools/local/consult.local.md",
             ),
         )
+        self.assertEqual(
+            config.get_include_set("repository_structure").paths,
+            ("docs/REPOSITORY_STRUCTURE.md",),
+        )
         self.assertNotIn(
             "ai-consult-tools/local/",
             config.filters.exclude_paths,

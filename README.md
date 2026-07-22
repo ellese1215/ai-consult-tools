@@ -64,6 +64,8 @@ python ai-consult-tools/consult.py structure sync
 python ai-consult-tools/consult.py structure check
 ```
 
+`structure check`は構造資料だけを診断する任意コマンドです。staleは`start`の実行不能を意味せず、bundle生成前の必須確認には使用しません。
+
 パスを検索する場合：
 
 ```text
@@ -92,6 +94,10 @@ python ai-consult-tools/consult.py start --target claude --profile <name> --case
 
 `start`は実行時の構造を走査し、`folder_tree.txt`と`local/cache/repo_structure_index.json`を必要に応じて更新します。構造に一時ファイルや作業用フォルダを残したまま実行しないでください。
 
+通常は`consult.py start`を直接一度実行します。事前の`structure check`、一時設定ファイル、`folder_tree.txt`のハッシュ不変確認、ZIP内部の重複検証を加えた外部wrapperは不要です。古い、欠落、形式不正の`folder_tree.txt`は`start`が再生成し、その更新は正常な処理結果です。
+
+`folder_tree.txt`はパス確認用の補助資料です。`start`は現在構造から再生成した内容をbundleへ自動収録しますが、同期前の鮮度や生成前後の不変性をbundle生成の合否条件にはしません。手動のinclude指定も不要です。
+
 ### 変更をレビューする
 
 ChatGPT：
@@ -106,7 +112,7 @@ Claude：
 python ai-consult-tools/consult.py review --target claude --profile <name> --case-name <case> --target-paths <path>...
 ```
 
-`review`はstaged、unstaged、未追跡を区別して収集します。対象パスを明示し、無関係な変更を混ぜないでください。
+`review`はstaged、unstaged、未追跡を区別して収集します。対象パスを明示し、無関係な変更を混ぜないでください。ignore対象のローカルファイルは、完全なファイルパスを明示した場合だけ未追跡項目として収録します。明示対象に変更がない場合または対象が存在しない場合も、`SKIPPED.md`へ理由を記録して黙って省略しません。
 
 ## 旧スクリプト互換入口
 

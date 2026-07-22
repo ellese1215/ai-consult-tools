@@ -22,6 +22,9 @@
     "common_rules": [
       "ai-consult-tools/shared/00_ai_consult_operation_rules.md",
       "ai-consult-tools/local/consult.local.md"
+    ],
+    "repository_structure": [
+      "docs/REPOSITORY_STRUCTURE.md"
     ]
   },
   "outputs": {

@@ -25,6 +25,7 @@ from ai_consult.config import ConsultConfig, ProjectProfile
 from ai_consult.filters import FilterError, PathFilter
 from ai_consult.path_resolver import (
     PathResolutionError,
+    RepoPathNotFoundError,
     RepoPathResolver,
 )
 
@@ -204,6 +205,10 @@ class GitDiffCollector:
             BundleOrigin.UNSTAGED
         )
         untracked_items, untracked_skips = self._collect_untracked()
+        target_skips = self._build_unrepresented_target_skips(
+            staged_items + unstaged_items + untracked_items,
+            staged_skips + unstaged_skips + untracked_skips,
+        )
 
         return GitReviewSnapshot(
             staged_items=tuple(sorted(staged_items, key=_item_sort_key)),
@@ -217,7 +222,8 @@ class GitDiffCollector:
                 sorted(
                     staged_skips
                     + unstaged_skips
-                    + untracked_skips,
+                    + untracked_skips
+                    + target_skips,
                     key=_skip_sort_key,
                 )
             ),
@@ -574,7 +580,9 @@ class GitDiffCollector:
             ),
             description="list untracked files",
         )
-        paths = _parse_nul_paths(output, "untracked file list")
+        paths = list(_parse_nul_paths(output, "untracked file list"))
+        paths.extend(self._list_explicit_ignored_files())
+        paths = list(_deduplicate_paths(paths))
         items: list[BundleItem] = []
         skipped: list[SkippedItem] = []
 
@@ -644,6 +652,97 @@ class GitDiffCollector:
             )
 
         return items, skipped
+
+    def _list_explicit_ignored_files(self) -> tuple[str, ...]:
+        if not self._target_paths:
+            return ()
+
+        literal_pathspecs = tuple(
+            f":(literal){path}" for path in self._target_paths
+        )
+        output = self._run_git_bytes(
+            (
+                "ls-files",
+                "--others",
+                "--ignored",
+                "--exclude-standard",
+                "-z",
+                "--",
+                *literal_pathspecs,
+            ),
+            description="list explicitly targeted ignored files",
+        )
+        exact_targets = {
+            path.casefold() for path in self._target_paths
+        }
+        return tuple(
+            path
+            for path in _parse_nul_paths(
+                output,
+                "explicit ignored file list",
+            )
+            if path.casefold() in exact_targets
+        )
+
+    def _build_unrepresented_target_skips(
+        self,
+        items: list[BundleItem],
+        skipped_items: list[SkippedItem],
+    ) -> list[SkippedItem]:
+        if not self._target_paths:
+            return []
+
+        represented_paths: list[str] = []
+
+        for item in items:
+            represented_paths.append(item.relative_path)
+
+            if item.previous_path is not None:
+                represented_paths.append(item.previous_path)
+
+        for item in skipped_items:
+            represented_paths.append(
+                item.relative_path or item.requested_path
+            )
+
+        results: list[SkippedItem] = []
+
+        for target in self._target_paths:
+            if any(
+                _path_is_within_target(path, target)
+                for path in represented_paths
+            ):
+                continue
+
+            try:
+                self._resolver.resolve(target, must_exist=True)
+            except RepoPathNotFoundError:
+                status = CollectionStatus.MISSING
+                reason = (
+                    "explicit review target does not exist and has no "
+                    "staged, unstaged, or untracked Git change"
+                )
+            except PathResolutionError as exc:
+                status = CollectionStatus.RESOLUTION_ERROR
+                reason = f"cannot resolve explicit review target: {exc}"
+            else:
+                status = CollectionStatus.NO_CHANGES
+                reason = (
+                    "explicit review target has no staged, unstaged, "
+                    "untracked, or explicitly selected ignored-file change"
+                )
+
+            results.append(
+                SkippedItem(
+                    requested_path=target,
+                    status=status,
+                    origin=BundleOrigin.EXPLICIT,
+                    reason=reason,
+                    relative_path=target,
+                )
+            )
+
+        return results
 
     def _is_selected(self, relative_path: str) -> bool:
         if not self._profile.contains(relative_path):
@@ -904,6 +1003,31 @@ def _parse_nul_paths(data: bytes, context: str) -> tuple[str, ...]:
     return tuple(
         _decode_git_path(field)
         for field in _split_nul_fields(data, context)
+    )
+
+
+def _deduplicate_paths(paths: Iterable[str]) -> tuple[str, ...]:
+    result: list[str] = []
+    seen: set[str] = set()
+
+    for path in paths:
+        folded = path.casefold()
+
+        if folded in seen:
+            continue
+
+        seen.add(folded)
+        result.append(path)
+
+    return tuple(result)
+
+
+def _path_is_within_target(path: str, target: str) -> bool:
+    folded_path = path.casefold()
+    folded_target = target.casefold()
+    return (
+        folded_path == folded_target
+        or folded_path.startswith(folded_target + "/")
     )
 
 

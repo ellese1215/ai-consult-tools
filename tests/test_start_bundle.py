@@ -33,6 +33,7 @@ from ai_consult.config import (
     ProjectProfile,
 )
 from ai_consult.inventory import (
+    FOLDER_TREE_FILENAME,
     FolderTreeComparison,
     InventoryError,
     InventoryEntry,
@@ -1078,6 +1079,7 @@ class StartBundleAssemblyTest(unittest.TestCase):
                     STRUCTURE_STATUS_PATH,
                     PATH_INDEX_PATH,
                     SKIPPED_PATH,
+                    FOLDER_TREE_FILENAME,
                     "project/main.txt",
                 ),
             )
@@ -1109,7 +1111,7 @@ class StartBundleAssemblyTest(unittest.TestCase):
 
             manifest = render_manifest_csv(bundle)
             manifest_lines = manifest.splitlines()
-            self.assertEqual(len(manifest_lines), 7)
+            self.assertEqual(len(manifest_lines), 8)
             self.assertEqual(
                 {line.split(",", 1)[0] for line in manifest_lines[1:]},
                 {
@@ -1118,12 +1120,25 @@ class StartBundleAssemblyTest(unittest.TestCase):
                     STRUCTURE_STATUS_PATH,
                     PATH_INDEX_PATH,
                     SKIPPED_PATH,
+                    FOLDER_TREE_FILENAME,
                     "project/main.txt",
                 },
             )
             self.assertIn("REPO_OVERVIEW.md,text,generated", manifest)
+            self.assertIn("folder_tree.txt,text,generated", manifest)
             self.assertIn("project/main.txt,text,explicit", manifest)
             self.assertNotIn("MANIFEST.csv", manifest)
+
+            folder_tree_item = bundle.items[5]
+            folder_tree_source = (repo / FOLDER_TREE_FILENAME).read_bytes()
+            self.assertEqual(
+                folder_tree_item.content.encode("utf-8"),
+                folder_tree_source,
+            )
+            self.assertEqual(
+                folder_tree_item.source_sha256,
+                hashlib.sha256(folder_tree_source).hexdigest(),
+            )
 
     def test_empty_requests_and_empty_profile_tree_build_generated_only_bundle(
         self,
@@ -1154,6 +1169,7 @@ class StartBundleAssemblyTest(unittest.TestCase):
                 STRUCTURE_STATUS_PATH,
                 PATH_INDEX_PATH,
                 SKIPPED_PATH,
+                FOLDER_TREE_FILENAME,
             ),
         )
         self.assertEqual(bundle.target_paths, ())
@@ -1167,7 +1183,7 @@ class StartBundleAssemblyTest(unittest.TestCase):
         self.assertIn("- (none)\n", contents[PATH_INDEX_PATH])
         self.assertIn("- Count: 0", contents[SKIPPED_PATH])
         self.assertIn("(none)\n", contents[SKIPPED_PATH])
-        self.assertEqual(len(render_manifest_csv(bundle).splitlines()), 6)
+        self.assertEqual(len(render_manifest_csv(bundle).splitlines()), 7)
 
     def test_profile_boundaries_and_duplicate_requests_reach_final_bundle(
         self,
@@ -1227,10 +1243,9 @@ class StartBundleAssemblyTest(unittest.TestCase):
             ("outside/shared.txt", "outside/shared.txt"),
         )
         self.assertEqual(
-            tuple(item.relative_path for item in bundle.items[5:]),
+            tuple(item.relative_path for item in bundle.items[6:]),
             ("project/inside.txt", "outside/shared.txt"),
         )
-        self.assertIs(bundle.items[5].origin, BundleOrigin.INCLUDE_SET)
         self.assertIs(bundle.items[6].origin, BundleOrigin.INCLUDE_SET)
         self.assertIn(
             "duplicate request; content already included by "
@@ -1318,7 +1333,7 @@ class StartBundleAssemblyTest(unittest.TestCase):
             )
 
         self.assertEqual(
-            tuple(item.relative_path for item in bundle.items[5:]),
+            tuple(item.relative_path for item in bundle.items[6:]),
             (
                 "ai-consult-tools/shared/00_ai_consult_operation_rules.md",
                 "ai-consult-tools/local/consult.local.md",
@@ -1418,7 +1433,7 @@ class StartBundleAssemblyTest(unittest.TestCase):
             expected_statuses[1:],
         )
         self.assertEqual(
-            tuple(item.relative_path for item in bundle.items[5:]),
+            tuple(item.relative_path for item in bundle.items[6:]),
             ("project/good.txt",),
         )
 
@@ -1647,6 +1662,7 @@ class StartBundleAssemblyTest(unittest.TestCase):
                 STRUCTURE_STATUS_PATH,
                 PATH_INDEX_PATH,
                 SKIPPED_PATH,
+                FOLDER_TREE_FILENAME,
                 "apps/project/a.txt",
                 "common/project/b.txt",
             ),
@@ -1685,7 +1701,9 @@ class StartBundleAssemblyTest(unittest.TestCase):
 
         self.assertEqual(scan.call_count, 1)
 
-    def test_include_set_folder_tree_is_collected_after_sync(self) -> None:
+    def test_include_set_folder_tree_reuses_automatic_generated_item(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             source = repo / "project" / "main.txt"
@@ -1716,9 +1734,25 @@ class StartBundleAssemblyTest(unittest.TestCase):
             for item in bundle.items
             if item.relative_path == "folder_tree.txt"
         )
-        self.assertIs(folder_tree_item.origin, BundleOrigin.INCLUDE_SET)
+        self.assertEqual(
+            sum(
+                item.relative_path == FOLDER_TREE_FILENAME
+                for item in bundle.items
+            ),
+            1,
+        )
+        self.assertIs(folder_tree_item.origin, BundleOrigin.GENERATED)
         self.assertIn("project/\n", folder_tree_item.content)
         self.assertIn("project/main.txt\n", folder_tree_item.content)
+        self.assertEqual(len(bundle.path_resolutions), 1)
+        self.assertIs(
+            bundle.path_resolutions[0].status,
+            CollectionStatus.INCLUDED,
+        )
+        self.assertIs(
+            bundle.path_resolutions[0].origin,
+            BundleOrigin.INCLUDE_SET,
+        )
 
     def test_generated_document_path_collision_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -189,6 +189,38 @@ class ChatGPTOutputAdapterTest(unittest.TestCase):
         self.assertIn("relative_path,content_kind,origin", manifest)
         self.assertNotIn("\r", manifest)
 
+    def test_start_zip_renders_generated_folder_tree_as_content(self) -> None:
+        bundle = make_start_bundle(
+            make_text_item(
+                "folder_tree.txt",
+                "project/\nproject/main.txt\n",
+                origin=BundleOrigin.GENERATED,
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            result = write_chatgpt_bundle(
+                bundle,
+                make_context(
+                    repo,
+                    OutputTarget.CHATGPT,
+                    out_name="chatgpt",
+                    max_bytes=1_000_000,
+                ),
+            )
+
+            with zipfile.ZipFile(result.output_paths[0]) as archive:
+                part = archive.read(
+                    "parts/snapshot_docs_part_001.md"
+                ).decode("utf-8")
+                manifest = archive.read("MANIFEST.csv").decode("utf-8")
+
+        self.assertIn("Path: folder_tree.txt", part)
+        self.assertIn("Origin: generated", part)
+        self.assertIn("project/main.txt", part)
+        self.assertIn("folder_tree.txt,text,generated", manifest)
+
     def test_zip_bytes_are_deterministic_for_same_input_context(self) -> None:
         bundle = make_start_bundle(
             make_text_item("docs/guide.md", "guide\n")

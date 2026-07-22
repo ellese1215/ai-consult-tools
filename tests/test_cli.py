@@ -4,6 +4,7 @@ import io
 import sys
 import tempfile
 import unittest
+import zipfile
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
@@ -502,6 +503,96 @@ class BundleCliConnectionTest(unittest.TestCase):
         self.assertEqual(review.command, "review")
         self.assertEqual(review.target, "claude")
         self.assertEqual(review.target_paths, ["src", "tests"])
+
+    def test_start_succeeds_after_structure_check_reports_stale(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            project = repo / "project"
+            project.mkdir()
+            (project / "main.txt").write_text(
+                "main\n",
+                encoding="utf-8",
+            )
+            profiles = repo / "ai-consult-tools" / "config"
+            profiles.mkdir(parents=True)
+            (profiles / "project_profiles.example.json").write_text(
+                """{
+  "schemaVersion": 1,
+  "profiles": {
+    "project": {
+      "scopeRoots": ["project"]
+    }
+  }
+}
+""",
+                encoding="utf-8",
+            )
+
+            sync_code, _, sync_error = self.run_cli(
+                "structure",
+                "sync",
+                "--repo-root",
+                str(repo),
+            )
+            self.assertEqual(sync_code, 0)
+            self.assertEqual(sync_error, "")
+
+            (project / "new.txt").write_text(
+                "new\n",
+                encoding="utf-8",
+            )
+            check_code, check_output, check_error = self.run_cli(
+                "structure",
+                "check",
+                "--repo-root",
+                str(repo),
+            )
+            self.assertEqual(check_code, EXIT_STALE)
+            self.assertIn("structure check: stale", check_output)
+            self.assertEqual(check_error, "")
+
+            start_code, start_output, start_error = self.run_cli(
+                "start",
+                "--target",
+                "chatgpt",
+                "--profile",
+                "project",
+                "--case-name",
+                "stale_structure",
+                "--repo-root",
+                str(repo),
+                "--include-paths",
+                "project/main.txt",
+            )
+            folder_tree = (repo / "folder_tree.txt").read_text(
+                encoding="utf-8",
+            )
+            zip_paths = tuple(
+                (
+                    repo
+                    / "ai-consult-tools"
+                    / "chatgpt"
+                    / "consult_case"
+                ).glob("*/*.zip")
+            )
+            self.assertEqual(len(zip_paths), 1)
+
+            with zipfile.ZipFile(zip_paths[0]) as archive:
+                manifest = archive.read("MANIFEST.csv").decode("utf-8")
+                part_text = "\n".join(
+                    archive.read(name).decode("utf-8")
+                    for name in archive.namelist()
+                    if name.startswith("parts/")
+                )
+
+        self.assertEqual(start_code, 0)
+        self.assertIn("start: created", start_output)
+        self.assertIn("output: ", start_output)
+        self.assertEqual(start_error, "")
+        self.assertIn("project/new.txt\n", folder_tree)
+        self.assertIn("folder_tree.txt,text,generated", manifest)
+        self.assertIn("Path: folder_tree.txt", part_text)
+        self.assertIn("project/new.txt", part_text)
 
     def test_start_collects_once_and_dispatches_selected_target(self) -> None:
         config = parse_config({"schemaVersion": 1})
