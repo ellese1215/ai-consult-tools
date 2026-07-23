@@ -77,6 +77,8 @@ python ai-consult-tools/consult.py find <query> --profile <name>
 python ai-consult-tools/consult.py start --target <chatgpt|claude> --profile <name> --case-name <case> --include-set common_rules --include-paths <path>...
 ```
 
+`common_rules`は、README、現行仕様、共通運用ルール、最小テンプレート、このローカル運用情報を収録する引き継ぎ用最小運用セットとして維持する。各ファイルを`--include-paths`へ重ねて指定しない。
+
 `start`は上記CLIを直接実行する。独自wrapperで事前の`structure check`、一時設定生成、`folder_tree.txt`のハッシュ不変確認、ZIP内部の再検証を追加しない。`start`による`folder_tree.txt`の再生成とbundleへの自動収録は正常な同期結果として扱う。
 
 ### レビュー

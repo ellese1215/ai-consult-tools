@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import unittest
 from pathlib import Path
@@ -10,9 +11,51 @@ POWERSHELL_BLOCK = re.compile(
     r"```powershell\n(.*?)```",
     flags=re.DOTALL,
 )
+HANDOFF_CORE_PATHS = (
+    "ai-consult-tools/README.md",
+    "ai-consult-tools/docs/01_current_spec.md",
+    "ai-consult-tools/shared/00_ai_consult_operation_rules.md",
+    "ai-consult-tools/shared/02_consult_template.md",
+    "ai-consult-tools/local/consult.local.md",
+)
 
 
 class OperationDocumentationTest(unittest.TestCase):
+    def test_handoff_core_include_set_is_synchronized(self) -> None:
+        config_paths = [
+            TOOL_ROOT / "config" / "consult.config.example.json",
+        ]
+        local_config = TOOL_ROOT / "local" / "consult.config.json"
+
+        if local_config.is_file():
+            config_paths.append(local_config)
+
+        for path in config_paths:
+            with self.subTest(path=path.relative_to(TOOL_ROOT)):
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                self.assertEqual(
+                    tuple(payload["includeSets"]["common_rules"]),
+                    HANDOFF_CORE_PATHS,
+                )
+
+        documentation_paths = (
+            TOOL_ROOT / "README.md",
+            TOOL_ROOT / "docs" / "01_current_spec.md",
+            TOOL_ROOT / "shared" / "00_ai_consult_operation_rules.md",
+            TOOL_ROOT / "shared" / "02_consult_template.md",
+            TOOL_ROOT / "shared" / "consult.local.example.md",
+        )
+        combined = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in documentation_paths
+        )
+
+        for relative_path in HANDOFF_CORE_PATHS:
+            self.assertIn(relative_path, combined)
+
+        self.assertIn("--include-set common_rules", combined)
+        self.assertIn("引き継ぎ用最小運用セット", combined)
+
     def test_folder_tree_contract_is_consistent(self) -> None:
         paths = (
             TOOL_ROOT / "README.md",
@@ -104,7 +147,7 @@ class OperationDocumentationTest(unittest.TestCase):
         )
 
     def test_rule_revisions_are_synchronized(self) -> None:
-        expected = "20260722-simplified-r4"
+        expected = "20260723-handoff-core-r6"
         rules = (
             TOOL_ROOT
             / "shared"

@@ -286,7 +286,10 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(
             config.get_include_set("common_rules").paths,
             (
+                "ai-consult-tools/README.md",
+                "ai-consult-tools/docs/01_current_spec.md",
                 "ai-consult-tools/shared/00_ai_consult_operation_rules.md",
+                "ai-consult-tools/shared/02_consult_template.md",
                 "ai-consult-tools/local/consult.local.md",
             ),
         )

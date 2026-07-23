@@ -92,6 +92,18 @@ python ai-consult-tools/consult.py start --target claude --profile <name> --case
 - `--include-paths`は、選択profileの`scopeRoots`内だけを指定します。
 - プロジェクト横断の共通資料は、設定済みの`--include-set`で収録します。
 
+標準の`common_rules`は、次の引き継ぎ用最小運用セットです。
+
+```text
+ai-consult-tools/README.md
+ai-consult-tools/docs/01_current_spec.md
+ai-consult-tools/shared/00_ai_consult_operation_rules.md
+ai-consult-tools/shared/02_consult_template.md
+ai-consult-tools/local/consult.local.md
+```
+
+引き継ぎ用の`start`では`--include-set common_rules`を省略しません。上記5ファイルを`--include-paths`へ個別に重ねず、設定済みinclude setから収録します。これにより、次の相談先は今回のプロジェクト資料に加えて、使用中の相談ツールの役割、現行CLI仕様、共通フロー、依頼形式、ローカル固有条件を確認できます。
+
 `start`は実行時の構造を走査し、`folder_tree.txt`と`local/cache/repo_structure_index.json`を必要に応じて更新します。構造に一時ファイルや作業用フォルダを残したまま実行しないでください。
 
 通常は`consult.py start`を直接一度実行します。事前の`structure check`、一時設定ファイル、`folder_tree.txt`のハッシュ不変確認、ZIP内部の重複検証を加えた外部wrapperは不要です。古い、欠落、形式不正の`folder_tree.txt`は`start`が再生成し、その更新は正常な処理結果です。

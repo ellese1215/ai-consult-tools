@@ -1,8 +1,8 @@
 # AI相談用・最小テンプレート
 
 > File: `shared/02_consult_template.md`
-> Updated: 2026-07-22
-> Rules revision: 20260722-simplified-r4
+> Updated: 2026-07-23
+> Rules revision: 20260723-handoff-core-r6
 
 必要な形式を一つだけ選び、空欄と不要な項目は削除する。
 
@@ -77,4 +77,4 @@ Codexがリポジトリを読める場合はbundleを添付しない。読めな
 <bundleが必要な場合だけ、実在するprofile・case・対象パスを指定したPowerShell全文>
 ```
 
-収録対象と標準コマンドは共通運用ルール第4章に従う。過去bundle一覧、共通ルール全文、完了作業の長いログは転記しない。
+収録対象と標準コマンドは共通運用ルール第4章に従う。bundleを使用する引き継ぎでは`--include-set common_rules`を維持し、README、現行仕様、共通ルール、最小テンプレート、ローカル運用情報を設定済みinclude setから収録する。これらを`--include-paths`へ個別に重ねず、過去bundle一覧、共通ルール全文、完了作業の長いログも転記しない。

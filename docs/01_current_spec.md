@@ -141,6 +141,7 @@ python ai-consult-tools/consult.py start \
 
 - 対象プロジェクトの開始用bundleを生成する
 - `--include-set`は複数回指定でき、設定済みの共通資料をプロファイル外からも収集できる
+- 引き継ぎ用の標準`start`は`--include-set common_rules`を指定し、README、現行仕様、共通ルール、最小テンプレート、ローカル運用情報を収録する
 - `--include-paths`はRepoRoot相対かつ選択プロファイル内の明示対象だけを指定できる
 - bundle収集前に現在構造を1回走査する
 - 同一snapshotから`folder_tree.txt`とローカル構造インデックスを必要に応じて同期する
@@ -199,7 +200,10 @@ python ai-consult-tools/consult.py review \
   },
   "includeSets": {
     "common_rules": [
+      "ai-consult-tools/README.md",
+      "ai-consult-tools/docs/01_current_spec.md",
       "ai-consult-tools/shared/00_ai_consult_operation_rules.md",
+      "ai-consult-tools/shared/02_consult_template.md",
       "ai-consult-tools/local/consult.local.md"
     ],
     "repository_structure": [
@@ -235,6 +239,8 @@ python ai-consult-tools/consult.py review \
 `inventory.excludePaths`は組み込みの構造除外規則へ追加される。ローカル設定やconsult生成物、`.git`、主要build生成物、代表的な機密名は組み込み既定で構造走査から除外する。
 
 設定内のパスはRepoRoot相対、`/`区切り、`.`と`..`を含まない正規形とする。
+
+標準設定の`common_rules`は、引き継ぎ先が相談ツール自体の現行運用を確認するための最小運用セットである。引き継ぎ用の`start`ではこのinclude setを省略せず、各構成ファイルを`--include-paths`へ個別に重複指定しない。プロジェクト資料は別途`--include-paths`または用途別include setで収録する。
 
 ---
 
