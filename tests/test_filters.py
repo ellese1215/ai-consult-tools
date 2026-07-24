@@ -16,6 +16,7 @@ if str(SRC_ROOT) not in sys.path:
 
 from ai_consult.filters import (
     BinaryFileError,
+    LiteralDirectoryBoundaryFilter,
     PathFilter,
     TextDecodeError,
     TextFileTooLargeError,
@@ -84,6 +85,48 @@ def make_xlsx_bytes() -> bytes:
 
 
 class PathFilterTest(unittest.TestCase):
+    def test_literal_directory_boundaries_do_not_use_glob_syntax(
+        self,
+    ) -> None:
+        path_filter = LiteralDirectoryBoundaryFilter(
+            (
+                "project/generated/[chat]",
+                "project/generated/[chat]",
+                "project/generated/[chat]/nested",
+                "project/generated/Claude 出力",
+            )
+        )
+
+        excluded = (
+            "project/generated/[chat]",
+            "project/generated/[chat]/bundle.zip",
+            r"PROJECT\GENERATED\[CHAT]\nested\old.md",
+            "project/generated/Claude 出力/結果.md",
+        )
+        included = (
+            "project/generated/c",
+            "project/generated/c/source.txt",
+            "project/generated/[chat]-backup/file.txt",
+            "project/generated/chat/file.txt",
+        )
+
+        for path in excluded:
+            with self.subTest(path=path):
+                self.assertTrue(path_filter.is_within(path))
+
+        for path in included:
+            with self.subTest(path=path):
+                self.assertFalse(path_filter.is_within(path))
+
+        self.assertEqual(
+            path_filter.directory_roots,
+            (
+                "project/generated/[chat]",
+                "project/generated/[chat]/nested",
+                "project/generated/Claude 出力",
+            ),
+        )
+
     def test_directory_exclusion_is_path_aware(self) -> None:
         path_filter = PathFilter(["apps/example/generated/"])
 

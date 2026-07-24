@@ -19,8 +19,10 @@ from ai_consult.collection import (
     CollectionResult,
     CollectionStatus,
     ExplicitFileCollector,
+    OutputRootPathError,
 )
 from ai_consult.config import ConsultConfig, ProjectProfile
+from ai_consult.filters import LiteralDirectoryBoundaryFilter
 from ai_consult.inventory import (
     FOLDER_TREE_FILENAME,
     FolderTreeComparison,
@@ -36,8 +38,6 @@ from ai_consult.inventory import (
     compare_folder_tree,
     compare_structure_index,
     render_folder_tree,
-    sync_folder_tree,
-    sync_structure_index,
 )
 from ai_consult.path_resolver import (
     PathResolutionError,
@@ -172,14 +172,14 @@ class StructureArtifactStatus:
                 "after_state must be a StructureState value"
             )
 
-        if self.after_state is not StructureState.CURRENT:
+        if self.updated:
             raise StartBundleStructureError(
-                "after_state must be current after successful sync"
+                "start must not update persistent structure artifacts"
             )
 
-        if self.updated != (self.before_state is not StructureState.CURRENT):
+        if self.after_state is not self.before_state:
             raise StartBundleStructureError(
-                "updated must reflect whether the pre-sync state was current"
+                "persistent structure state must remain unchanged during start"
             )
 
         if self.before_state is StructureState.INVALID:
@@ -398,11 +398,6 @@ def build_structure_status(
     profile: ProjectProfile,
     folder_tree_before: FolderTreeComparison,
     structure_index_before: StructureIndexComparison,
-    *,
-    folder_tree_updated: bool,
-    structure_index_updated: bool,
-    folder_tree_after: FolderTreeComparison,
-    structure_index_after: StructureIndexComparison,
 ) -> ProjectStructureStatus:
     _require_type(profile, ProjectProfile, "profile")
     _require_type(
@@ -415,27 +410,8 @@ def build_structure_status(
         StructureIndexComparison,
         "structure_index_before",
     )
-    _require_type(
-        folder_tree_after,
-        FolderTreeComparison,
-        "folder_tree_after",
-    )
-    _require_type(
-        structure_index_after,
-        StructureIndexComparison,
-        "structure_index_after",
-    )
-
-    folder_tree_status = _build_artifact_status(
-        folder_tree_before,
-        folder_tree_updated,
-        folder_tree_after,
-    )
-    structure_index_status = _build_artifact_status(
-        structure_index_before,
-        structure_index_updated,
-        structure_index_after,
-    )
+    folder_tree_status = _build_artifact_status(folder_tree_before)
+    structure_index_status = _build_artifact_status(structure_index_before)
     profile_diff = None
 
     if folder_tree_before.diff is not None:
@@ -463,7 +439,7 @@ def render_structure_status(status: ProjectStructureStatus) -> str:
         "",
         f"- Profile: `{status.profile_name}`",
         "",
-        "## Before Sync",
+        "## Persistent Structure at Start",
         "",
         "| Source | Status | Detail |",
         "|---|---|---|",
@@ -473,7 +449,24 @@ def render_structure_status(status: ProjectStructureStatus) -> str:
             status.structure_index,
         ),
         "",
-        "## Profile Changes",
+        "## Start Behavior",
+        "",
+        "- Persistent `folder_tree.txt` was not changed.",
+        (
+            "- Persistent `"
+            + STRUCTURE_INDEX_RELATIVE_PATH
+            + "` was not changed."
+        ),
+        (
+            "- Bundle structure information, including the generated "
+            "`folder_tree.txt`, was created from one live inventory snapshot."
+        ),
+        (
+            "- A `stale`, `missing`, or `invalid` state is reported here "
+            "but does not prevent `start`."
+        ),
+        "",
+        "## Profile Changes Compared with Persistent folder_tree.txt",
         "",
     ]
 
@@ -484,20 +477,6 @@ def render_structure_status(status: ProjectStructureStatus) -> str:
     else:
         lines.extend(_render_diff(status.profile_diff))
 
-    lines.extend(
-        [
-            "",
-            "## Sync Result",
-            "",
-            "| Source | Updated | Status After Sync |",
-            "|---|---|---|",
-            _render_after_status_row("folder_tree.txt", status.folder_tree),
-            _render_after_status_row(
-                STRUCTURE_INDEX_RELATIVE_PATH,
-                status.structure_index,
-            ),
-        ]
-    )
     return "\n".join(lines) + "\n"
 
 
@@ -577,18 +556,12 @@ def _append_tree_lines(
 
 def _build_artifact_status(
     before: FolderTreeComparison | StructureIndexComparison,
-    updated: bool,
-    after: FolderTreeComparison | StructureIndexComparison,
 ) -> StructureArtifactStatus:
-    if type(updated) is not bool:
-        raise StartBundleStructureError("updated must be a boolean")
-
     before_state = _comparison_state(before)
-    after_state = _comparison_state(after)
     return StructureArtifactStatus(
         before_state=before_state,
-        updated=updated,
-        after_state=after_state,
+        updated=False,
+        after_state=before_state,
         format_error=before.format_error,
     )
 
@@ -649,17 +622,6 @@ def _render_before_status_row(
 ) -> str:
     detail = _escape_table_cell(status.format_error or "-")
     return f"| `{source}` | `{status.before_state.value}` | {detail} |"
-
-
-def _render_after_status_row(
-    source: str,
-    status: StructureArtifactStatus,
-) -> str:
-    updated = "yes" if status.updated else "no"
-    return (
-        f"| `{source}` | `{updated}` | "
-        f"`{status.after_state.value}` |"
-    )
 
 
 def _render_diff(diff: StructureDiff) -> list[str]:
@@ -893,6 +855,22 @@ def build_start_file_requests(
         )
         for path in paths
     )
+
+    output_root_filter = LiteralDirectoryBoundaryFilter(
+        config.output_roots
+    )
+
+    for request in requests:
+        output_root = output_root_filter.matching_root(
+            request.requested_path
+        )
+
+        if output_root is not None:
+            raise StartBundleCollectionError(
+                "configured output root cannot be included: "
+                f"{request.requested_path}; outputRoot={output_root}"
+            )
+
     return tuple(requests)
 
 
@@ -967,7 +945,10 @@ def collect_start_files(
                     )
                     continue
 
-        results.append(collector.collect_one(request.requested_path))
+        try:
+            results.append(collector.collect_one(request.requested_path))
+        except OutputRootPathError as exc:
+            raise StartBundleCollectionError(str(exc)) from exc
 
     return build_start_collection_snapshot(
         profile,
@@ -1322,39 +1303,35 @@ def collect_start_bundle(
     _require_type(config, ConsultConfig, "config")
     _require_type(profile, ProjectProfile, "profile")
 
+    include_set_names = tuple(include_set_names)
+    explicit_paths = tuple(explicit_paths)
+
+    try:
+        build_start_file_requests(
+            config,
+            include_set_names=include_set_names,
+            explicit_paths=explicit_paths,
+        )
+    except StartBundleCollectionError as exc:
+        raise StartBundleAssemblyError(
+            f"cannot assemble start bundle: {exc}"
+        ) from exc
+
     try:
         scanner = InventoryScanner.from_config(repo_root, config)
         inventory_snapshot = scanner.scan()
         folder_tree_before = compare_folder_tree(inventory_snapshot)
         structure_index_before = compare_structure_index(inventory_snapshot)
-        folder_tree_sync = sync_folder_tree(inventory_snapshot)
-        structure_index_sync = sync_structure_index(inventory_snapshot)
     except (InventoryError, OSError, ValueError) as exc:
         raise StartBundleAssemblyError(
-            f"cannot synchronize start bundle structure: {exc}"
+            f"cannot inspect start bundle structure: {exc}"
         ) from exc
 
-    if folder_tree_sync.comparison != folder_tree_before:
-        raise StartBundleAssemblyError(
-            "folder_tree.txt changed while the start bundle was being assembled"
-        )
-
-    if structure_index_sync.comparison != structure_index_before:
-        raise StartBundleAssemblyError(
-            "structure index changed while the start bundle was being assembled"
-        )
-
     try:
-        folder_tree_after = compare_folder_tree(inventory_snapshot)
-        structure_index_after = compare_structure_index(inventory_snapshot)
         structure_status = build_structure_status(
             profile,
             folder_tree_before,
             structure_index_before,
-            folder_tree_updated=folder_tree_sync.updated,
-            structure_index_updated=structure_index_sync.updated,
-            folder_tree_after=folder_tree_after,
-            structure_index_after=structure_index_after,
         )
         project_tree = build_project_tree(inventory_snapshot, profile)
         collection_snapshot = collect_start_files(
@@ -1512,7 +1489,7 @@ def _validate_start_relative_path(value: str, context: str) -> None:
             f"{context} is not a canonical path: {value}"
         )
 
-    if any(character in value for character in "*?["):
+    if any(character in value for character in "*?"):
         raise StartBundleCollectionError(
             f"{context} must not contain wildcards: {value}"
         )

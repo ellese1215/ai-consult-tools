@@ -474,12 +474,28 @@ def _print_output_result(
     command: str,
     result: OutputResult,
 ) -> None:
+    if result.target is OutputTarget.CHATGPT and (
+        result.bundle_path is None
+        or result.bundle_sha256 is None
+        or result.sidecar_path is None
+        or result.sidecar_match is not True
+    ):
+        raise OutputAdapterError(
+            "ChatGPT output result is missing verified ZIP sidecar metadata"
+        )
+
     print(f"{command}: created")
     print(f"target: {result.target.value}")
     print(f"bundle: {result.bundle_label}")
 
     for path in result.output_paths:
         print(f"output: {path}")
+
+    if result.target is OutputTarget.CHATGPT:
+        print(f"bundle_path: {result.bundle_path}")
+        print(f"bundle_sha256: {result.bundle_sha256}")
+        print(f"sidecar_path: {result.sidecar_path}")
+        print("sidecar_match: true")
 
 
 def _run_start(args: argparse.Namespace) -> int:

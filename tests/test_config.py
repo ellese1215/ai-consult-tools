@@ -184,6 +184,32 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(config.outputs.chatgpt.max_chars_per_part, 567)
         self.assertEqual(config.outputs.claude.out_root, "build/claude")
         self.assertEqual(config.outputs.claude.max_chars_per_part, 890)
+        self.assertEqual(
+            config.output_roots,
+            ("build/chatgpt", "build/claude"),
+        )
+
+    def test_output_roots_are_deduplicated_without_glob_conversion(
+        self,
+    ) -> None:
+        config = parse_config(
+            {
+                "schemaVersion": 1,
+                "outputs": {
+                    "chatgpt": {
+                        "outRoot": "project/generated/[chat]",
+                    },
+                    "claude": {
+                        "outRoot": "PROJECT/GENERATED/[CHAT]",
+                    },
+                },
+            }
+        )
+
+        self.assertEqual(
+            config.output_roots,
+            ("project/generated/[chat]",),
+        )
 
     def test_rejects_invalid_output_settings(self) -> None:
         invalid_payloads = (

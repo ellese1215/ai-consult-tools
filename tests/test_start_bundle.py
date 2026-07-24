@@ -27,10 +27,14 @@ from ai_consult.collection import (
     CollectionStatus,
 )
 from ai_consult.config import (
+    ChatGPTOutputConfig,
+    ClaudeOutputConfig,
     ConsultConfig,
     FilterConfig,
     IncludeSetConfig,
+    OutputsConfig,
     ProjectProfile,
+    parse_config,
 )
 from ai_consult.inventory import (
     FOLDER_TREE_FILENAME,
@@ -43,6 +47,7 @@ from ai_consult.inventory import (
     MoveCandidate,
     StructureDiff,
     StructureIndexComparison,
+    sync_folder_tree,
     sync_structure_index,
 )
 from ai_consult.start_bundle import (
@@ -57,6 +62,7 @@ from ai_consult.start_bundle import (
     StartBundleStructureError,
     StartCollectionSnapshot,
     StartFileRequest,
+    StructureArtifactStatus,
     StructureState,
     build_generated_text_item,
     build_project_tree,
@@ -229,7 +235,7 @@ class ProjectTreeTest(unittest.TestCase):
 
 
 class StructureStatusTest(unittest.TestCase):
-    def test_distinguishes_all_pre_sync_states(self) -> None:
+    def test_distinguishes_all_persistent_start_states(self) -> None:
         profile = ProjectProfile(name="project", scope_roots=("project",))
         current = folder_comparison(
             current=True,
@@ -252,16 +258,14 @@ class StructureStatusTest(unittest.TestCase):
             diff=None,
             error="folder_tree.txt must use LF line endings",
         )
-        after_folder = current
-        after_index = index_comparison(current=True, exists=True)
         cases = (
-            (current, False, StructureState.CURRENT),
-            (missing, True, StructureState.MISSING),
-            (stale, True, StructureState.STALE),
-            (invalid, True, StructureState.INVALID),
+            (current, StructureState.CURRENT),
+            (missing, StructureState.MISSING),
+            (stale, StructureState.STALE),
+            (invalid, StructureState.INVALID),
         )
 
-        for before, updated, expected in cases:
+        for before, expected in cases:
             with self.subTest(expected=expected):
                 status = build_structure_status(
                     profile,
@@ -275,10 +279,6 @@ class StructureStatusTest(unittest.TestCase):
                             else None
                         ),
                     ),
-                    folder_tree_updated=updated,
-                    structure_index_updated=updated,
-                    folder_tree_after=after_folder,
-                    structure_index_after=after_index,
                 )
 
                 self.assertEqual(status.folder_tree.before_state, expected)
@@ -286,6 +286,10 @@ class StructureStatusTest(unittest.TestCase):
                     status.structure_index.before_state,
                     expected,
                 )
+                self.assertFalse(status.folder_tree.updated)
+                self.assertFalse(status.structure_index.updated)
+                self.assertEqual(status.folder_tree.after_state, expected)
+                self.assertEqual(status.structure_index.after_state, expected)
 
     def test_invalid_folder_tree_does_not_invent_diff(self) -> None:
         status = build_structure_status(
@@ -297,17 +301,6 @@ class StructureStatusTest(unittest.TestCase):
                 error="invalid folder tree",
             ),
             index_comparison(current=True, exists=True),
-            folder_tree_updated=True,
-            structure_index_updated=False,
-            folder_tree_after=folder_comparison(
-                current=True,
-                exists=True,
-                diff=StructureDiff(),
-            ),
-            structure_index_after=index_comparison(
-                current=True,
-                exists=True,
-            ),
         )
 
         rendered = render_structure_status(status)
@@ -351,17 +344,6 @@ class StructureStatusTest(unittest.TestCase):
                 diff=diff,
             ),
             index_comparison(current=False, exists=True),
-            folder_tree_updated=True,
-            structure_index_updated=True,
-            folder_tree_after=folder_comparison(
-                current=True,
-                exists=True,
-                diff=StructureDiff(),
-            ),
-            structure_index_after=index_comparison(
-                current=True,
-                exists=True,
-            ),
         )
 
         rendered = render_structure_status(status)
@@ -387,7 +369,9 @@ class StructureStatusTest(unittest.TestCase):
             rendered,
         )
 
-    def test_render_is_deterministic_lf_with_sync_result(self) -> None:
+    def test_render_is_deterministic_lf_and_disclaims_persistent_writes(
+        self,
+    ) -> None:
         status = build_structure_status(
             ProjectProfile(name="project", scope_roots=("project",)),
             folder_comparison(
@@ -396,17 +380,6 @@ class StructureStatusTest(unittest.TestCase):
                 diff=StructureDiff(added_paths=("project/new.py",)),
             ),
             index_comparison(current=True, exists=True),
-            folder_tree_updated=True,
-            structure_index_updated=False,
-            folder_tree_after=folder_comparison(
-                current=True,
-                exists=True,
-                diff=StructureDiff(),
-            ),
-            structure_index_after=index_comparison(
-                current=True,
-                exists=True,
-            ),
         )
 
         first = render_structure_status(status)
@@ -415,46 +388,32 @@ class StructureStatusTest(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertNotIn("\r", first)
         self.assertTrue(first.endswith("\n"))
-        self.assertIn("| `folder_tree.txt` | `yes` | `current` |", first)
+        self.assertIn("| `folder_tree.txt` | `missing` |", first)
         self.assertIn(
             "| `ai-consult-tools/local/cache/repo_structure_index.json` | "
-            "`no` | `current` |",
+            "`current` |",
             first,
         )
-
-    def test_rejects_inconsistent_or_failed_sync_state(self) -> None:
-        profile = ProjectProfile(name="project", scope_roots=("project",))
-        stale_folder = folder_comparison(
-            current=False,
-            exists=True,
-            diff=StructureDiff(),
+        self.assertIn(
+            "Persistent `folder_tree.txt` was not changed.",
+            first,
         )
-        current_index = index_comparison(current=True, exists=True)
+        self.assertIn("one live inventory snapshot", first)
+        self.assertNotIn("Sync Result", first)
 
+    def test_rejects_any_claim_that_start_updated_structure(self) -> None:
         with self.assertRaises(StartBundleStructureError):
-            build_structure_status(
-                profile,
-                stale_folder,
-                current_index,
-                folder_tree_updated=False,
-                structure_index_updated=False,
-                folder_tree_after=folder_comparison(
-                    current=True,
-                    exists=True,
-                    diff=StructureDiff(),
-                ),
-                structure_index_after=current_index,
+            StructureArtifactStatus(
+                before_state=StructureState.STALE,
+                updated=True,
+                after_state=StructureState.CURRENT,
             )
 
         with self.assertRaises(StartBundleStructureError):
-            build_structure_status(
-                profile,
-                stale_folder,
-                current_index,
-                folder_tree_updated=True,
-                structure_index_updated=False,
-                folder_tree_after=stale_folder,
-                structure_index_after=current_index,
+            StructureArtifactStatus(
+                before_state=StructureState.STALE,
+                updated=False,
+                after_state=StructureState.CURRENT,
             )
 
     def test_structure_status_model_is_frozen(self) -> None:
@@ -466,17 +425,6 @@ class StructureStatusTest(unittest.TestCase):
                 diff=StructureDiff(),
             ),
             index_comparison(current=True, exists=True),
-            folder_tree_updated=False,
-            structure_index_updated=False,
-            folder_tree_after=folder_comparison(
-                current=True,
-                exists=True,
-                diff=StructureDiff(),
-            ),
-            structure_index_after=index_comparison(
-                current=True,
-                exists=True,
-            ),
         )
 
         with self.assertRaises(dataclasses.FrozenInstanceError):
@@ -929,10 +877,6 @@ class StartGeneratedDocumentTest(unittest.TestCase):
             profile,
             current_folder,
             current_index,
-            folder_tree_updated=False,
-            structure_index_updated=False,
-            folder_tree_after=current_folder,
-            structure_index_after=current_index,
         )
         collection = build_start_collection_snapshot(profile, (), ())
 
@@ -990,10 +934,6 @@ class StartGeneratedDocumentTest(unittest.TestCase):
             other,
             current_folder,
             current_index,
-            folder_tree_updated=False,
-            structure_index_updated=False,
-            folder_tree_after=current_folder,
-            structure_index_after=current_index,
         )
         collection = build_start_collection_snapshot(other, (), ())
 
@@ -1046,7 +986,9 @@ class StartGeneratedDocumentTest(unittest.TestCase):
 
 
 class StartBundleAssemblyTest(unittest.TestCase):
-    def test_collects_complete_start_bundle_and_syncs_structure(self) -> None:
+    def test_collects_complete_start_bundle_without_syncing_structure(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             source = repo / "project" / "main.txt"
@@ -1085,15 +1027,9 @@ class StartBundleAssemblyTest(unittest.TestCase):
             )
             self.assertEqual(len(bundle.path_resolutions), 1)
             self.assertEqual(bundle.skipped_items, ())
-            self.assertTrue((repo / "folder_tree.txt").is_file())
-            self.assertTrue(
-                (
-                    repo
-                    / "ai-consult-tools"
-                    / "local"
-                    / "cache"
-                    / "repo_structure_index.json"
-                ).is_file()
+            self.assertFalse((repo / "folder_tree.txt").exists())
+            self.assertFalse(
+                (repo / "ai-consult-tools" / "local" / "cache").exists()
             )
 
             status_item = next(
@@ -1107,7 +1043,11 @@ class StartBundleAssemblyTest(unittest.TestCase):
                 "| `missing` |",
                 status_item.content,
             )
-            self.assertIn("| `folder_tree.txt` | `yes` | `current` |", status_item.content)
+            self.assertIn(
+                "Persistent `folder_tree.txt` was not changed.",
+                status_item.content,
+            )
+            self.assertNotIn("Sync Result", status_item.content)
 
             manifest = render_manifest_csv(bundle)
             manifest_lines = manifest.splitlines()
@@ -1130,15 +1070,231 @@ class StartBundleAssemblyTest(unittest.TestCase):
             self.assertNotIn("MANIFEST.csv", manifest)
 
             folder_tree_item = bundle.items[5]
-            folder_tree_source = (repo / FOLDER_TREE_FILENAME).read_bytes()
-            self.assertEqual(
-                folder_tree_item.content.encode("utf-8"),
-                folder_tree_source,
-            )
+            folder_tree_source = folder_tree_item.content.encode("utf-8")
+            self.assertIn("project/main.txt\n", folder_tree_item.content)
             self.assertEqual(
                 folder_tree_item.source_sha256,
                 hashlib.sha256(folder_tree_source).hexdigest(),
             )
+
+    def test_missing_structure_index_does_not_create_parent_directory(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "project").mkdir()
+            cache = repo / "ai-consult-tools" / "local" / "cache"
+
+            collect_start_bundle(
+                repo,
+                ConsultConfig(schema_version=1, filters=FilterConfig()),
+                ProjectProfile(name="project", scope_roots=("project",)),
+            )
+
+            self.assertFalse(cache.exists())
+
+    def test_stale_and_dirty_folder_tree_bytes_remain_identical(self) -> None:
+        for initial_bytes in (
+            b"project/\n",
+            b"user-maintained-entry.txt\n",
+        ):
+            with self.subTest(initial_bytes=initial_bytes):
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    repo = Path(temp_dir)
+                    source = repo / "project" / "main.txt"
+                    source.parent.mkdir()
+                    source.write_text("live\n", encoding="utf-8")
+                    tree_path = repo / FOLDER_TREE_FILENAME
+                    tree_path.write_bytes(initial_bytes)
+
+                    bundle = collect_start_bundle(
+                        repo,
+                        ConsultConfig(
+                            schema_version=1,
+                            filters=FilterConfig(),
+                        ),
+                        ProjectProfile(
+                            name="project",
+                            scope_roots=("project",),
+                        ),
+                    )
+
+                    generated_tree = next(
+                        item.content
+                        for item in bundle.items
+                        if item.relative_path == FOLDER_TREE_FILENAME
+                    )
+                    status = next(
+                        item.content
+                        for item in bundle.items
+                        if item.relative_path == STRUCTURE_STATUS_PATH
+                    )
+
+                    self.assertEqual(tree_path.read_bytes(), initial_bytes)
+                    self.assertIn("project/main.txt\n", generated_tree)
+                    self.assertIn(
+                        "| `folder_tree.txt` | `stale` |",
+                        status,
+                    )
+                    self.assertNotIn("repair", status.casefold())
+
+    def test_configured_output_roots_are_absent_from_all_start_content(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            project = repo / "project"
+            chatgpt_output = project / "generated" / "[chat]"
+            claude_output = project / "generated" / "claude"
+            sibling = project / "generated" / "c"
+            chatgpt_output.mkdir(parents=True)
+            claude_output.mkdir(parents=True)
+            sibling.mkdir(parents=True)
+            (project / "main.txt").write_text("main\n", encoding="utf-8")
+            (sibling / "source.txt").write_text(
+                "kept source\n",
+                encoding="utf-8",
+            )
+            (chatgpt_output / "old.zip").write_text(
+                "old chatgpt output",
+                encoding="utf-8",
+            )
+            (claude_output / "old.md").write_text(
+                "old claude output",
+                encoding="utf-8",
+            )
+            (repo / "folder_tree.txt").write_text(
+                "\n".join(
+                    (
+                        "project/",
+                        "project/generated/",
+                        "project/generated/[chat]/",
+                        "project/generated/[chat]/old.zip",
+                        "project/generated/c/",
+                        "project/generated/c/source.txt",
+                        "project/generated/claude/",
+                        "project/generated/claude/old.md",
+                        "project/main.txt",
+                        "",
+                    )
+                ),
+                encoding="utf-8",
+                newline="\n",
+            )
+            config = ConsultConfig(
+                schema_version=1,
+                filters=FilterConfig(),
+                outputs=OutputsConfig(
+                    chatgpt=ChatGPTOutputConfig(
+                        out_root="project/generated/[chat]",
+                    ),
+                    claude=ClaudeOutputConfig(
+                        out_root="project/generated/claude",
+                    ),
+                ),
+            )
+            profile = ProjectProfile(
+                name="project",
+                scope_roots=("project",),
+            )
+
+            first = collect_start_bundle(
+                repo,
+                config,
+                profile,
+            )
+            (chatgpt_output / "first_bundle.zip.sha256").write_text(
+                "sidecar",
+                encoding="utf-8",
+            )
+            second = collect_start_bundle(repo, config, profile)
+
+        forbidden = (
+            "project/generated/[chat]",
+            "project/generated/claude",
+            "old.zip",
+            "old.md",
+            "first_bundle.zip.sha256",
+        )
+
+        for bundle in (first, second):
+            combined = "\n".join(item.content for item in bundle.items)
+            recorded_paths = (
+                *(item.relative_path for item in bundle.items),
+                *(
+                    item.relative_path or item.requested_path
+                    for item in bundle.skipped_items
+                ),
+            )
+
+            for value in forbidden:
+                self.assertNotIn(value, combined)
+                self.assertFalse(
+                    any(value in path for path in recorded_paths)
+                )
+
+            self.assertEqual(bundle.skipped_items, ())
+            self.assertIn("project/generated/c/source.txt", combined)
+
+    def test_output_roots_cannot_be_explicitly_included(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            output_root = repo / "project" / "generated" / "[chat]"
+            output_root.mkdir(parents=True)
+            (output_root / "old.zip").write_text(
+                "old",
+                encoding="utf-8",
+            )
+            source = repo / "project" / "source.txt"
+            source.write_text("source\n", encoding="utf-8")
+            config = parse_config(
+                {
+                    "schemaVersion": 1,
+                    "outputs": {
+                        "chatgpt": {
+                            "outRoot": "project/generated/[chat]",
+                        },
+                        "claude": {
+                            "outRoot": "project/generated/claude",
+                        },
+                    },
+                }
+            )
+            profile = ProjectProfile(
+                name="project",
+                scope_roots=("project",),
+            )
+
+            for path in (
+                "project/generated/[chat]",
+                "project/generated/[chat]/old.zip",
+            ):
+                with self.subTest(path=path):
+                    with self.assertRaisesRegex(
+                        StartBundleAssemblyError,
+                        "configured output root cannot be included",
+                    ):
+                        collect_start_bundle(
+                            repo,
+                            config,
+                            profile,
+                            explicit_paths=(path,),
+                        )
+
+            bundle = collect_start_bundle(
+                repo,
+                config,
+                profile,
+                explicit_paths=("project/source.txt",),
+            )
+
+        self.assertIn(
+            "project/source.txt",
+            tuple(item.relative_path for item in bundle.items),
+        )
+
 
     def test_empty_requests_and_empty_profile_tree_build_generated_only_bundle(
         self,
@@ -1482,10 +1638,25 @@ class StartBundleAssemblyTest(unittest.TestCase):
                 name="project",
                 scope_roots=("project",),
             )
-            collect_start_bundle(repo, config, profile)
-            collect_start_bundle(repo, config, profile)
+            (
+                repo / "ai-consult-tools" / "local" / "cache"
+            ).mkdir(parents=True)
+            snapshot = InventoryScanner.from_config(repo, config).scan()
+            sync_folder_tree(snapshot)
+            sync_structure_index(snapshot)
+            tree_before = (repo / FOLDER_TREE_FILENAME).read_bytes()
+            index_path = (
+                repo
+                / "ai-consult-tools"
+                / "local"
+                / "cache"
+                / "repo_structure_index.json"
+            )
+            index_before = index_path.read_bytes()
 
             bundle = collect_start_bundle(repo, config, profile)
+            tree_after = (repo / FOLDER_TREE_FILENAME).read_bytes()
+            index_after = index_path.read_bytes()
 
         status = next(
             item.content
@@ -1498,12 +1669,9 @@ class StartBundleAssemblyTest(unittest.TestCase):
             "| `current` |",
             status,
         )
-        self.assertIn("| `folder_tree.txt` | `no` | `current` |", status)
-        self.assertIn(
-            "| `ai-consult-tools/local/cache/repo_structure_index.json` "
-            "| `no` | `current` |",
-            status,
-        )
+        self.assertEqual(tree_after, tree_before)
+        self.assertEqual(index_after, index_before)
+        self.assertNotIn("Status After Sync", status)
 
     def test_stale_folder_tree_filters_outside_profile_diff(
         self,
@@ -1521,15 +1689,19 @@ class StartBundleAssemblyTest(unittest.TestCase):
                 name="project",
                 scope_roots=("project",),
             )
-            collect_start_bundle(repo, config, profile)
-            collect_start_bundle(repo, config, profile)
+            initial = InventoryScanner.from_config(repo, config).scan()
+            sync_folder_tree(initial)
+            sync_structure_index(initial)
             outside = repo / "outside" / "new.txt"
             outside.parent.mkdir()
             outside.write_text("outside\n", encoding="utf-8")
             snapshot = InventoryScanner.from_config(repo, config).scan()
             sync_structure_index(snapshot)
+            tree_path = repo / FOLDER_TREE_FILENAME
+            tree_before = tree_path.read_bytes()
 
             bundle = collect_start_bundle(repo, config, profile)
+            tree_after = tree_path.read_bytes()
 
         status = next(
             item.content
@@ -1550,8 +1722,9 @@ class StartBundleAssemblyTest(unittest.TestCase):
         self.assertNotIn("outside/new.txt", status)
         self.assertNotIn("outside/new.txt", project_tree)
         self.assertIn("- (none)", status)
+        self.assertEqual(tree_after, tree_before)
 
-    def test_invalid_structure_sources_are_reported_and_repaired(
+    def test_invalid_structure_sources_are_reported_without_repair(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1567,11 +1740,11 @@ class StartBundleAssemblyTest(unittest.TestCase):
                 name="project",
                 scope_roots=("project",),
             )
-            collect_start_bundle(repo, config, profile)
-            collect_start_bundle(repo, config, profile)
-            (repo / "folder_tree.txt").write_bytes(
-                b"\xef\xbb\xbfinvalid\n"
-            )
+            initial = InventoryScanner.from_config(repo, config).scan()
+            sync_folder_tree(initial)
+            sync_structure_index(initial)
+            tree_path = repo / "folder_tree.txt"
+            tree_path.write_bytes(b"\xef\xbb\xbfinvalid\n")
             structure_index = (
                 repo
                 / "ai-consult-tools"
@@ -1580,8 +1753,12 @@ class StartBundleAssemblyTest(unittest.TestCase):
                 / "repo_structure_index.json"
             )
             structure_index.write_bytes(b"{broken\n")
+            tree_before = tree_path.read_bytes()
+            index_before = structure_index.read_bytes()
 
             bundle = collect_start_bundle(repo, config, profile)
+            tree_after = tree_path.read_bytes()
+            index_after = structure_index.read_bytes()
 
         status = next(
             item.content
@@ -1596,12 +1773,10 @@ class StartBundleAssemblyTest(unittest.TestCase):
             status,
         )
         self.assertIn("invalid structure index JSON", status)
-        self.assertIn("| `folder_tree.txt` | `yes` | `current` |", status)
-        self.assertIn(
-            "| `ai-consult-tools/local/cache/repo_structure_index.json` "
-            "| `yes` | `current` |",
-            status,
-        )
+        self.assertIn("was not changed", status)
+        self.assertNotIn("Sync Result", status)
+        self.assertEqual(tree_after, tree_before)
+        self.assertEqual(index_after, index_before)
 
     def test_same_current_input_is_deterministic_across_multiple_scope_roots(
         self,
@@ -1633,9 +1808,6 @@ class StartBundleAssemblyTest(unittest.TestCase):
                 "apps/project/a.txt",
                 "common/project/b.txt",
             )
-            collect_start_bundle(repo, config, profile)
-            collect_start_bundle(repo, config, profile)
-
             first_bundle = collect_start_bundle(
                 repo,
                 config,
@@ -1747,7 +1919,7 @@ class StartBundleAssemblyTest(unittest.TestCase):
         self.assertEqual(len(bundle.path_resolutions), 1)
         self.assertIs(
             bundle.path_resolutions[0].status,
-            CollectionStatus.INCLUDED,
+            CollectionStatus.MISSING,
         )
         self.assertIs(
             bundle.path_resolutions[0].origin,
@@ -1786,60 +1958,33 @@ class StartBundleAssemblyTest(unittest.TestCase):
                     include_set_names=("collision",),
                 )
 
-    def test_structure_sync_failure_aborts_bundle(self) -> None:
+    def test_start_does_not_call_structure_sync_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             (repo / "project").mkdir()
 
             with mock.patch(
-                "ai_consult.start_bundle.sync_structure_index",
+                "ai_consult.inventory.sync_folder_tree",
                 side_effect=InventoryError("write failed"),
-            ):
-                with self.assertRaisesRegex(
-                    StartBundleAssemblyError,
-                    "cannot synchronize",
-                ):
-                    collect_start_bundle(
-                        repo,
-                        ConsultConfig(
-                            schema_version=1,
-                            filters=FilterConfig(),
-                        ),
-                        ProjectProfile(
-                            name="project",
-                            scope_roots=("project",),
-                        ),
-                    )
+            ) as folder_sync, mock.patch(
+                "ai_consult.inventory.sync_structure_index",
+                side_effect=InventoryError("write failed"),
+            ) as index_sync:
+                bundle = collect_start_bundle(
+                    repo,
+                    ConsultConfig(
+                        schema_version=1,
+                        filters=FilterConfig(),
+                    ),
+                    ProjectProfile(
+                        name="project",
+                        scope_roots=("project",),
+                    ),
+                )
 
-    def test_structure_change_during_sync_aborts_bundle(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            repo = Path(temp_dir)
-            (repo / "project").mkdir()
-            stale = folder_comparison(
-                current=False,
-                exists=True,
-                diff=StructureDiff(added_paths=("project",)),
-            )
-
-            with mock.patch(
-                "ai_consult.start_bundle.compare_folder_tree",
-                return_value=stale,
-            ):
-                with self.assertRaisesRegex(
-                    StartBundleAssemblyError,
-                    "changed while",
-                ):
-                    collect_start_bundle(
-                        repo,
-                        ConsultConfig(
-                            schema_version=1,
-                            filters=FilterConfig(),
-                        ),
-                        ProjectProfile(
-                            name="project",
-                            scope_roots=("project",),
-                        ),
-                    )
+        self.assertIs(bundle.command, BundleCommand.START)
+        folder_sync.assert_not_called()
+        index_sync.assert_not_called()
 
 
 if __name__ == "__main__":

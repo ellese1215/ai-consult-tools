@@ -56,7 +56,7 @@ python ai-consult-tools/consult.py structure sync
 
 `folder_tree.txt`とローカル構造インデックスを、同一の構造snapshotから同期します。
 
-`start`もbundle生成前に同じ構造同期を自動実行します。手動の`structure sync`は、`find`を使う前に索引だけを更新する場合や、bundleを生成せず構造正本だけを同期する場合に使用します。
+永続的な構造資料を更新するコマンドは`structure sync`だけです。`start`、`structure check`、`find`は`folder_tree.txt`とローカル構造インデックスを書き換えません。
 
 確認だけを行う場合：
 
@@ -104,11 +104,11 @@ ai-consult-tools/local/consult.local.md
 
 引き継ぎ用の`start`では`--include-set common_rules`を省略しません。上記5ファイルを`--include-paths`へ個別に重ねず、設定済みinclude setから収録します。これにより、次の相談先は今回のプロジェクト資料に加えて、使用中の相談ツールの役割、現行CLI仕様、共通フロー、依頼形式、ローカル固有条件を確認できます。
 
-`start`は実行時の構造を走査し、`folder_tree.txt`と`local/cache/repo_structure_index.json`を必要に応じて更新します。構造に一時ファイルや作業用フォルダを残したまま実行しないでください。
+`start`は実行時の構造を一度走査し、そのlive inventory snapshotからbundle内の`PROJECT_TREE.md`と`folder_tree.txt`を生成します。RepoRoot上の`folder_tree.txt`と`local/cache/repo_structure_index.json`は作成、修復、更新しません。
 
-通常は`consult.py start`を直接一度実行します。事前の`structure check`、一時設定ファイル、`folder_tree.txt`のハッシュ不変確認、ZIP内部の重複検証を加えた外部wrapperは不要です。古い、欠落、形式不正の`folder_tree.txt`は`start`が再生成し、その更新は正常な処理結果です。
+通常は`consult.py start`を直接一度実行します。事前の`structure check`や一時設定ファイルは不要です。永続構造資料が`current`、`stale`、`missing`、`invalid`のどの状態でも`start`を実行でき、実際の開始時状態と取得可能なprofile内差分を`STRUCTURE_STATUS.md`へ記録します。
 
-`folder_tree.txt`はパス確認用の補助資料です。`start`は現在構造から再生成した内容をbundleへ自動収録しますが、同期前の鮮度や生成前後の不変性をbundle生成の合否条件にはしません。手動のinclude指定も不要です。
+`folder_tree.txt`はパス確認用の補助資料です。bundle内の同名itemはlive snapshotから生成され、永続ファイルの読直し結果ではありません。RepoRoot上の既存`folder_tree.txt`は`start`前後でbyte-identicalに維持されます。bundle内itemの手動include指定は不要です。
 
 ### 変更をレビューする
 
@@ -153,12 +153,19 @@ ai-consult-tools/claude/consult_bundle_claude.py
 ```text
 ChatGPT:
 ai-consult-tools/chatgpt/consult_case/<BundleLabel>/<BundleLabel>.zip
+ai-consult-tools/chatgpt/consult_case/<BundleLabel>/<BundleLabel>.zip.sha256
 
 Claude:
 ai-consult-tools/claude/consult_case/<BundleLabel>/
 ```
 
-ChatGPTは決定的ZIP、Claudeは結合Markdownまたはpart分割Markdownを生成します。収集結果とmanifestの契約は共通です。
+ChatGPTの正式成果物は決定的ZIPとSHA-256 sidecarの2点、Claudeは結合Markdownまたはpart分割Markdownです。sidecarは`<64桁の大文字SHA-256> *<ZIP basename><CRLF>`のUTF-8 BOMなし1行で、同じディレクトリのZIPだけを検証します。ZIPとsidecarは一時ディレクトリ内で完成・検証後に同時確定されます。
+
+ChatGPT成功時は従来の`start: created`／`review: created`、`target:`、`bundle:`、`output:`に加え、`bundle_path:`、`bundle_sha256:`、`sidecar_path:`、`sidecar_match: true`を出力します。wrapperは成果物名を推測せず、これらの行を使用します。
+
+設定された`outputs.chatgpt.outRoot`と`outputs.claude.outRoot`は生成物専用領域です。既定値か任意値か、現在のtarget、tracked／untrackedを問わず、各outRoot自体と全子孫を構造走査、start本文収集、reviewのGit差分・未追跡収集から無言で完全除外します。outRootはglobではなく、`[`なども文字として扱うRepoRoot相対のリテラルなディレクトリ境界です。一般の`filters.excludePaths`とは別に判定するため、自動除外した成果物パスを`SKIPPED.md`へ記録しません。
+
+`--include-paths`、include set、reviewの`--target-paths`でoutRoot自体または子孫を明示指定すると、正式成果物を作らずエラー終了します。outRoot外の正規ソースはリポジトリ相対パスと本文を維持し、現在生成した成果物を受け取るためのCLIの`output:`およびChatGPT専用4行も維持します。ツールは既存成果物を削除、移動、上書きしません。
 
 ## 基本フロー
 

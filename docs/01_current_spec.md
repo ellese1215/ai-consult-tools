@@ -1,7 +1,7 @@
 # AI相談運用基盤 現行技術仕様
 
 > File: `docs/01_current_spec.md`
-> Updated: 2026-07-21
+> Updated: 2026-07-24
 
 ## 1. この文書の役割
 
@@ -144,14 +144,13 @@ python ai-consult-tools/consult.py start \
 - 引き継ぎ用の標準`start`は`--include-set common_rules`を指定し、README、現行仕様、共通ルール、最小テンプレート、ローカル運用情報を収録する
 - `--include-paths`はRepoRoot相対かつ選択プロファイル内の明示対象だけを指定できる
 - bundle収集前に現在構造を1回走査する
-- 同一snapshotから`folder_tree.txt`とローカル構造インデックスを必要に応じて同期する
-- 同期前の`folder_tree.txt`または構造インデックスが未生成、古い、形式不正でも、同期可能であれば生成を継続する
-- 同期後の`folder_tree.txt`を`generated`由来のパス案内資料としてbundleへ自動収録する
-- 同期前の状態、構造差分、同期結果を`STRUCTURE_STATUS.md`へ記録する
-- 対象プロジェクトの同期後の最新構造情報を生成文書へ収録する
+- 永続`folder_tree.txt`とローカル構造インデックスを作成、修復、更新しない
+- 永続構造資料が`current`、`stale`、`missing`、`invalid`のいずれでも生成を継続する
+- 同一live inventory snapshotから`generated`由来の`folder_tree.txt`と構造生成文書をbundle内生成する
+- 永続構造資料の開始時状態、取得可能な`folder_tree.txt`のprofile内差分、startが永続資料を変更していない事実を`STRUCTURE_STATUS.md`へ記録する
 - `PROJECT_TREE.md`には選択プロファイルの`scopeRoots`だけを収録する
 - 明示対象の解決結果、除外、不足、失敗を`PATH_INDEX.md`と`SKIPPED.md`へ記録する
-- 外部wrapperによる事前の`structure check`、一時設定生成、`folder_tree.txt`のハッシュ不変確認、ZIP内部の重複検証を標準契約に含めない
+- 外部wrapperによる事前の`structure check`、一時設定生成、ZIP内部の重複検証を標準契約に含めない
 
 ### 3.6 `review`
 
@@ -238,6 +237,14 @@ python ai-consult-tools/consult.py review \
 
 `inventory.excludePaths`は組み込みの構造除外規則へ追加される。ローカル設定やconsult生成物、`.git`、主要build生成物、代表的な機密名は組み込み既定で構造走査から除外する。
 
+実際に設定された`outputs.chatgpt.outRoot`と`outputs.claude.outRoot`は生成物専用領域である。設定読込時の正規化済みRepoRoot相対パスを、globではなくリテラルなディレクトリ境界として保持する。`[`、空白、Unicodeなどをglobメタ文字へ変換せず、outRootとの完全一致または`/`境界の子孫だけを大文字小文字を区別しない既存方針で判定する。兄弟や単なる前方一致は除外せず、duplicate／nested設定も同じ判定へ収束する。
+
+両outRootは現在のtarget、tracked／untracked、staged／unstaged、拡張子を問わず、live inventory、collection、Git差分候補、folder tree、構造index、`PROJECT_TREE.md`、`PATH_INDEX.md`、`STRUCTURE_STATUS.md`のパス列挙、bundle item、`MANIFEST.csv`、`SKIPPED.md`から列挙・読込・hash計算前に無言で完全除外する。自動outRoot除外は一般の`filters.excludePaths`／`inventory.excludePaths`へ追加せず、一般除外の理由記録と`SkippedItem`契約を維持したまま別経路で扱う。
+
+`start --include-paths`、include set、`review --target-paths`でoutRoot自体または子孫を明示指定した場合は、正式成果物を作成せずエラー終了する。outRoot外の正規ソースはリポジトリ相対パス、本文、`MANIFEST.csv` item、part見出し、構造資料のパスを維持する。ソース文書が設定項目`outRoot`を説明していても本文を伏字化しない。
+
+CLIが現在の実行で新規生成した成果物を通知する`output:`と、ChatGPTの`bundle_path:`、`bundle_sha256:`、`sidecar_path:`、`sidecar_match:`は収集除外の例外として端末出力へ維持するが、後続bundleへ継承しない。既存bundle、ZIP、sidecar、Claude Markdown、一時成果物は削除、移動、上書きしない。
+
 設定内のパスはRepoRoot相対、`/`区切り、`.`と`..`を含まない正規形とする。
 
 標準設定の`common_rules`は、引き継ぎ先が相談ツール自体の現行運用を確認するための最小運用セットである。引き継ぎ用の`start`ではこのinclude setを省略せず、各構成ファイルを`--include-paths`へ個別に重複指定しない。プロジェクト資料は別途`--include-paths`または用途別include setで収録する。
@@ -289,10 +296,11 @@ python ai-consult-tools/consult.py review \
 - 決定的ソート
 - 構造が変わった場合だけ更新
 - 手動編集禁止
-- `start`が必要に応じて再生成する
-- `start`が同期後の内容をパス案内資料としてbundleへ自動収録する
+- 永続ファイルを更新するのは`structure sync`だけ
+- `start`は永続ファイルを変更せず、live inventory snapshotから同名itemをbundle内生成する
 - 手動のinclude指定は不要
-- 鮮度、存在、形式、生成前後のハッシュ不変をbundle生成の合否条件にしない
+- 永続ファイルの鮮度、存在、形式は`STRUCTURE_STATUS.md`へ報告するが、bundle生成の停止条件にしない
+- 既存の永続ファイルは`start`前後でbyte-identicalに維持する
 
 ### 6.2 ローカル構造インデックス
 
@@ -309,6 +317,8 @@ ai-consult-tools/local/cache/repo_structure_index.json
 - 末尾LFあり
 - 生成日時と絶対RepoRootを収録しない
 - `entries`は構造走査と同じ決定的順序
+
+永続インデックスを作成または更新するのは`structure sync`だけである。`start`は親ディレクトリを含めて作成せず、既存インデックスを変更しない。`structure check`は比較だけ、`find`はcurrentなインデックスの読取りだけを担当する。
 
 構造走査では画像、音声、フォント、ZIPなどもパスとして記録できる。本文収集は判定済みテキストだけを対象とする。
 
@@ -385,7 +395,7 @@ MANIFEST.csv
 | `SKIPPED.md` | 除外、不足、失敗理由 |
 | `MANIFEST.csv` | 収録項目一覧 |
 
-同期後の`folder_tree.txt`は、上記固定文書とは別の通常content itemとして`parts/snapshot_docs_part_<NNN>.md`へ収録し、`MANIFEST.csv`では`origin=generated`として記録する。
+live inventory snapshotから生成した`folder_tree.txt`は、上記固定文書とは別の通常content itemとして`parts/snapshot_docs_part_<NNN>.md`へ収録し、`MANIFEST.csv`では`origin=generated`として記録する。永続`folder_tree.txt`の内容を更新または再読込して生成しない。
 
 ### 7.5 `review`生成文書
 
@@ -403,6 +413,7 @@ MANIFEST.csv
 - 一時ディレクトリ内で出力を完成させる
 - 完成後に最終成果物ディレクトリへrenameする
 - 失敗時は一時ディレクトリを削除する
+- 一時ディレクトリ名はBundleLabelを含まない短い固定prefixを使用する
 - 同名の最終成果物が存在する場合は上書きせずエラーとする
 - 出力先はRepoRoot内でなければならない
 
@@ -416,7 +427,16 @@ MANIFEST.csv
 
 ```text
 ai-consult-tools/chatgpt/consult_case/<BundleLabel>/<BundleLabel>.zip
+ai-consult-tools/chatgpt/consult_case/<BundleLabel>/<BundleLabel>.zip.sha256
 ```
+
+ZIPと`.zip.sha256`の2点がstartとreviewの正式成果物である。sidecarはUTF-8 BOMなしで、次の1行と末尾CRLF 1件だけを持つ。
+
+```text
+<64桁の大文字SHA-256> *<ZIPのbasename><CRLF>
+```
+
+sidecarへ絶対パスやZIP以外を記録しない。ZIPのentry検証、ZIP hash計算、sidecar生成、sidecarと同一ディレクトリのZIPとの照合を一時ディレクトリ内で完了してから、成果物ディレクトリを確定する。失敗時はZIPだけ、sidecarだけ、古いhash、一時成果物、最終bundleディレクトリのいずれも残さない。
 
 ### 8.2 ZIP構造
 
@@ -461,6 +481,19 @@ parts/diff_<group>_part_<NNN>.md
 - 同一入力と同一出力コンテキストから同一バイト列を生成する
 
 part上限は文字数とUTF-8バイト数の両方で判定する。1つのbundle itemを途中分割せず、item境界でpartを分ける。
+
+### 8.4 CLI成功出力
+
+ZIPとsidecarの生成・検証・最終配置が完了した場合だけ終了コード0と`start: created`または`review: created`を返す。従来の`target:`、`bundle:`、各`output:`に加えて次を固定行として出力する。
+
+```text
+bundle_path: <ZIP絶対パス>
+bundle_sha256: <64桁の大文字SHA-256>
+sidecar_path: <sidecar絶対パス>
+sidecar_match: true
+```
+
+通常wrapperはBundleLabelや成果物名を推測せず、このCLI出力を解析する。Claudeはsidecar対象外であり、この4行を追加しない。
 
 ---
 

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import io
+import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -136,6 +139,77 @@ class StructureCliTest(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(error, "")
         self.assertEqual(tree, "ai-consult-tools/\nvisible.txt\n")
+
+    def test_structure_sync_uses_literal_output_root_boundaries(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            local = repo / "ai-consult-tools" / "local"
+            local.mkdir(parents=True)
+            (local / "consult.config.json").write_text(
+                """{
+  "schemaVersion": 1,
+  "outputs": {
+    "chatgpt": {"outRoot": "project/generated/[chat]"},
+    "claude": {"outRoot": "project/generated/Claude 出力"}
+  }
+}
+""",
+                encoding="utf-8",
+            )
+            chatgpt = repo / "project" / "generated" / "[chat]"
+            claude = repo / "project" / "generated" / "Claude 出力"
+            sibling = repo / "project" / "generated" / "c"
+
+            for directory in (chatgpt, claude, sibling):
+                directory.mkdir(parents=True)
+
+            (chatgpt / "old.zip").write_text("zip", encoding="utf-8")
+            (claude / "old.md").write_text("output", encoding="utf-8")
+            (sibling / "source.txt").write_text(
+                "source",
+                encoding="utf-8",
+            )
+
+            exit_code, output, error = self.run_cli(
+                "structure",
+                "sync",
+                "--repo-root",
+                str(repo),
+            )
+            tree = (repo / "folder_tree.txt").read_text(encoding="utf-8")
+            index = json.loads(
+                (
+                    repo
+                    / "ai-consult-tools"
+                    / "local"
+                    / "cache"
+                    / "repo_structure_index.json"
+                ).read_text(encoding="utf-8")
+            )
+            index_paths = tuple(
+                item["relativePath"] for item in index["entries"]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("structure sync: updated", output)
+        self.assertEqual(error, "")
+        self.assertIn("project/generated/c/source.txt", tree)
+        self.assertIn("project/generated/c/source.txt", index_paths)
+
+        for forbidden in (
+            "project/generated/[chat]",
+            "project/generated/Claude 出力",
+        ):
+            self.assertNotIn(forbidden, tree)
+            self.assertFalse(
+                any(
+                    path == forbidden
+                    or path.startswith(forbidden + "/")
+                    for path in index_paths
+                )
+            )
 
     def test_explicit_config_outside_repo_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as repo_dir:
@@ -550,6 +624,8 @@ class BundleCliConnectionTest(unittest.TestCase):
             self.assertEqual(check_code, EXIT_STALE)
             self.assertIn("structure check: stale", check_output)
             self.assertEqual(check_error, "")
+            tree_path = repo / "folder_tree.txt"
+            folder_tree_before = tree_path.read_bytes()
 
             start_code, start_output, start_error = self.run_cli(
                 "start",
@@ -564,9 +640,7 @@ class BundleCliConnectionTest(unittest.TestCase):
                 "--include-paths",
                 "project/main.txt",
             )
-            folder_tree = (repo / "folder_tree.txt").read_text(
-                encoding="utf-8",
-            )
+            folder_tree_after = tree_path.read_bytes()
             zip_paths = tuple(
                 (
                     repo
@@ -575,7 +649,20 @@ class BundleCliConnectionTest(unittest.TestCase):
                     / "consult_case"
                 ).glob("*/*.zip")
             )
+            sidecar_paths = tuple(
+                (
+                    repo
+                    / "ai-consult-tools"
+                    / "chatgpt"
+                    / "consult_case"
+                ).glob("*/*.zip.sha256")
+            )
             self.assertEqual(len(zip_paths), 1)
+            self.assertEqual(len(sidecar_paths), 1)
+            bundle_sha256 = hashlib.sha256(
+                zip_paths[0].read_bytes()
+            ).hexdigest().upper()
+            sidecar = sidecar_paths[0].read_bytes()
 
             with zipfile.ZipFile(zip_paths[0]) as archive:
                 manifest = archive.read("MANIFEST.csv").decode("utf-8")
@@ -589,10 +676,416 @@ class BundleCliConnectionTest(unittest.TestCase):
         self.assertIn("start: created", start_output)
         self.assertIn("output: ", start_output)
         self.assertEqual(start_error, "")
-        self.assertIn("project/new.txt\n", folder_tree)
+        self.assertEqual(folder_tree_after, folder_tree_before)
         self.assertIn("folder_tree.txt,text,generated", manifest)
         self.assertIn("Path: folder_tree.txt", part_text)
         self.assertIn("project/new.txt", part_text)
+        self.assertEqual(
+            sidecar,
+            f"{bundle_sha256} *{zip_paths[0].name}\r\n".encode("utf-8"),
+        )
+        self.assertIn(f"bundle_path: {zip_paths[0]}", start_output)
+        self.assertIn(f"bundle_sha256: {bundle_sha256}", start_output)
+        self.assertIn(f"sidecar_path: {sidecar_paths[0]}", start_output)
+        self.assertIn("sidecar_match: true", start_output)
+
+    def test_two_starts_with_custom_output_root_do_not_self_collect(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            project = repo / "project"
+            project.mkdir()
+            (project / "main.txt").write_text("main\n", encoding="utf-8")
+            local = repo / "ai-consult-tools" / "local"
+            local.mkdir(parents=True)
+            (local / "consult.config.json").write_text(
+                """{
+  "schemaVersion": 1,
+  "outputs": {
+    "chatgpt": {
+      "outRoot": "artifacts/chatgpt"
+    },
+    "claude": {
+      "outRoot": "artifacts/claude"
+    }
+  }
+}
+""",
+                encoding="utf-8",
+            )
+            (local / "project_profiles.json").write_text(
+                """{
+  "schemaVersion": 1,
+  "profiles": {
+    "project": {
+      "scopeRoots": ["project"]
+    }
+  }
+}
+""",
+                encoding="utf-8",
+            )
+
+            first_code, first_output, first_error = self.run_cli(
+                "start",
+                "--target",
+                "chatgpt",
+                "--profile",
+                "project",
+                "--case-name",
+                "custom_first",
+                "--repo-root",
+                str(repo),
+                "--include-paths",
+                "project/main.txt",
+            )
+            second_code, second_output, second_error = self.run_cli(
+                "start",
+                "--target",
+                "chatgpt",
+                "--profile",
+                "project",
+                "--case-name",
+                "custom_second",
+                "--repo-root",
+                str(repo),
+                "--include-paths",
+                "project/main.txt",
+            )
+            bundle_directories = tuple(
+                sorted(
+                    (repo / "artifacts" / "chatgpt").iterdir(),
+                    key=lambda item: item.name,
+                )
+            )
+            first_directory = next(
+                item for item in bundle_directories
+                if item.name.endswith("_custom_first")
+            )
+            second_directory = next(
+                item for item in bundle_directories
+                if item.name.endswith("_custom_second")
+            )
+            second_zip = next(second_directory.glob("*.zip"))
+
+            with zipfile.ZipFile(second_zip) as archive:
+                second_text = "\n".join(
+                    archive.read(name).decode("utf-8")
+                    for name in archive.namelist()
+                )
+
+        self.assertEqual((first_code, second_code), (0, 0))
+        self.assertEqual((first_error, second_error), ("", ""))
+        self.assertIn("sidecar_match: true", first_output)
+        self.assertIn("sidecar_match: true", second_output)
+        self.assertEqual(len(bundle_directories), 2)
+        self.assertNotIn(first_directory.name, second_text)
+        self.assertNotIn(first_directory.name + ".zip", second_text)
+        self.assertNotIn(first_directory.name + ".zip.sha256", second_text)
+
+    def test_output_root_include_fails_without_creating_artifacts(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            local = repo / "ai-consult-tools" / "local"
+            local.mkdir(parents=True)
+            (local / "consult.config.json").write_text(
+                """{
+  "schemaVersion": 1,
+  "outputs": {
+    "chatgpt": {"outRoot": "project/generated/[chat]"},
+    "claude": {"outRoot": "project/generated/claude"}
+  }
+}
+""",
+                encoding="utf-8",
+            )
+            (local / "project_profiles.json").write_text(
+                """{
+  "schemaVersion": 1,
+  "profiles": {
+    "project": {"scopeRoots": ["project"]}
+  }
+}
+""",
+                encoding="utf-8",
+            )
+            output_root = repo / "project" / "generated" / "[chat]"
+            output_root.mkdir(parents=True)
+            (output_root / "old.zip").write_text(
+                "old",
+                encoding="utf-8",
+            )
+
+            results = tuple(
+                self.run_cli(
+                    "start",
+                    "--target",
+                    "chatgpt",
+                    "--profile",
+                    "project",
+                    "--case-name",
+                    "must_fail",
+                    "--repo-root",
+                    str(repo),
+                    "--include-paths",
+                    path,
+                )
+                for path in (
+                    "project/generated/[chat]",
+                    "project/generated/[chat]/old.zip",
+                )
+            )
+            remaining = tuple(output_root.iterdir())
+
+        self.assertEqual(remaining[0].name, "old.zip")
+        self.assertEqual(len(remaining), 1)
+
+        for exit_code, output, error in results:
+            self.assertEqual(exit_code, EXIT_ERROR)
+            self.assertEqual(output, "")
+            self.assertIn(
+                "configured output root cannot be included",
+                error,
+            )
+            self.assertNotIn("created", output)
+            self.assertNotIn("output:", output)
+            self.assertNotIn("bundle_path:", output)
+
+    def test_start_and_review_outputs_never_inherit_output_artifacts(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            local = repo / "ai-consult-tools" / "local"
+            local.mkdir(parents=True)
+            (local / "consult.config.json").write_text(
+                """{
+  "schemaVersion": 1,
+  "outputs": {
+    "chatgpt": {"outRoot": "project/generated/[chat]"},
+    "claude": {"outRoot": "project/generated/claude"}
+  }
+}
+""",
+                encoding="utf-8",
+            )
+            (local / "project_profiles.json").write_text(
+                """{
+  "schemaVersion": 1,
+  "profiles": {
+    "project": {"scopeRoots": ["project"]}
+  }
+}
+""",
+                encoding="utf-8",
+            )
+            source = repo / "project" / "source.txt"
+            sibling = repo / "project" / "generated" / "c" / "source.txt"
+            chatgpt_root = repo / "project" / "generated" / "[chat]"
+            claude_root = repo / "project" / "generated" / "claude"
+
+            for path in (source, sibling):
+                path.parent.mkdir(parents=True, exist_ok=True)
+
+            chatgpt_root.mkdir(parents=True)
+            claude_root.mkdir(parents=True)
+            source.write_text("SOURCE_BODY_BASE\n", encoding="utf-8")
+            sibling.write_text("SIBLING_BODY_KEEP\n", encoding="utf-8")
+            (chatgpt_root / "tracked.txt").write_text(
+                "OUTROOT_TRACKED_BASE\n",
+                encoding="utf-8",
+            )
+            (claude_root / "tracked.txt").write_text(
+                "CLAUDE_TRACKED_BASE\n",
+                encoding="utf-8",
+            )
+
+            def run_git(*args: str) -> None:
+                result = subprocess.run(
+                    ("git", *args),
+                    cwd=repo,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                    shell=False,
+                )
+
+                if result.returncode != 0:
+                    self.fail(
+                        result.stderr.decode("utf-8", errors="replace")
+                    )
+
+            run_git("init", "-q")
+            run_git("config", "user.email", "test@example.com")
+            run_git("config", "user.name", "Test User")
+            run_git("config", "core.autocrlf", "false")
+            run_git("add", "-A")
+            run_git("commit", "-qm", "base")
+
+            source.write_text("SOURCE_BODY_CHANGED\n", encoding="utf-8")
+            (chatgpt_root / "tracked.txt").write_text(
+                "OUTROOT_TRACKED_STAGED\n",
+                encoding="utf-8",
+            )
+            run_git("add", "project/generated/[chat]/tracked.txt")
+            (chatgpt_root / "tracked.txt").write_text(
+                "OUTROOT_TRACKED_UNSTAGED\n",
+                encoding="utf-8",
+            )
+            (claude_root / "tracked.txt").write_text(
+                "CLAUDE_TRACKED_UNSTAGED\n",
+                encoding="utf-8",
+            )
+            old_directory = chatgpt_root / "old"
+            old_directory.mkdir()
+            (old_directory / "bundle.zip").write_text(
+                "OLD_CHATGPT_ZIP_SECRET\n",
+                encoding="utf-8",
+            )
+            (old_directory / "bundle.zip.sha256").write_text(
+                "SIDECAR_SECRET\n",
+                encoding="utf-8",
+            )
+            (chatgpt_root / "temporary.v4_tmp").write_text(
+                "TEMP_SECRET\n",
+                encoding="utf-8",
+            )
+            (claude_root / "old_bundle.md").write_text(
+                "CLAUDE_OLD_SECRET\n",
+                encoding="utf-8",
+            )
+
+            common_start_args = (
+                "--profile",
+                "project",
+                "--repo-root",
+                str(repo),
+                "--include-paths",
+                "project/source.txt",
+                "project/generated/c/source.txt",
+            )
+            chat_start = self.run_cli(
+                "start",
+                "--target",
+                "chatgpt",
+                "--case-name",
+                "outroot_start_chatgpt",
+                *common_start_args,
+            )
+            claude_start = self.run_cli(
+                "start",
+                "--target",
+                "claude",
+                "--case-name",
+                "outroot_start_claude",
+                *common_start_args,
+            )
+            chat_review = self.run_cli(
+                "review",
+                "--target",
+                "chatgpt",
+                "--profile",
+                "project",
+                "--case-name",
+                "outroot_review_chatgpt",
+                "--repo-root",
+                str(repo),
+            )
+            claude_review = self.run_cli(
+                "review",
+                "--target",
+                "claude",
+                "--profile",
+                "project",
+                "--case-name",
+                "outroot_review_claude",
+                "--repo-root",
+                str(repo),
+            )
+
+            def output_value(output: str, label: str) -> Path:
+                prefix = label + ": "
+                return Path(
+                    next(
+                        line[len(prefix):]
+                        for line in output.splitlines()
+                        if line.startswith(prefix)
+                    )
+                )
+
+            chat_texts: list[str] = []
+
+            for result in (chat_start, chat_review):
+                archive_path = output_value(result[1], "bundle_path")
+
+                with zipfile.ZipFile(archive_path) as archive:
+                    chat_texts.append(
+                        "\n".join(
+                            (
+                                *archive.namelist(),
+                                *(
+                                    archive.read(name).decode("utf-8")
+                                    for name in archive.namelist()
+                                ),
+                            )
+                        )
+                    )
+
+            claude_texts = [
+                output_value(result[1], "output").read_text(encoding="utf-8")
+                for result in (claude_start, claude_review)
+            ]
+
+        for exit_code, output, error in (
+            chat_start,
+            claude_start,
+            chat_review,
+            claude_review,
+        ):
+            self.assertEqual(exit_code, 0)
+            self.assertIn("created", output)
+            self.assertIn("output: ", output)
+            self.assertEqual(error, "")
+
+        for _, output, _ in (chat_start, chat_review):
+            self.assertIn("bundle_path: ", output)
+            self.assertIn("bundle_sha256: ", output)
+            self.assertIn("sidecar_path: ", output)
+            self.assertIn("sidecar_match: true", output)
+
+        for _, output, _ in (claude_start, claude_review):
+            self.assertNotIn("bundle_path: ", output)
+            self.assertNotIn("bundle_sha256: ", output)
+            self.assertNotIn("sidecar_path: ", output)
+            self.assertNotIn("sidecar_match:", output)
+
+        forbidden = (
+            "project/generated/[chat]",
+            "project/generated/claude",
+            "OUTROOT_TRACKED",
+            "CLAUDE_TRACKED",
+            "OLD_CHATGPT_ZIP_SECRET",
+            "SIDECAR_SECRET",
+            "TEMP_SECRET",
+            "CLAUDE_OLD_SECRET",
+        )
+
+        for rendered in (*chat_texts, *claude_texts):
+            for value in forbidden:
+                self.assertNotIn(value, rendered)
+
+        for rendered in (chat_texts[0], claude_texts[0]):
+            self.assertIn("project/source.txt", rendered)
+            self.assertIn("SOURCE_BODY_CHANGED", rendered)
+            self.assertIn("project/generated/c/source.txt", rendered)
+            self.assertIn("SIBLING_BODY_KEEP", rendered)
+
+        for rendered in (chat_texts[1], claude_texts[1]):
+            self.assertIn("project/source.txt", rendered)
+            self.assertIn("SOURCE_BODY_CHANGED", rendered)
 
     def test_start_collects_once_and_dispatches_selected_target(self) -> None:
         config = parse_config({"schemaVersion": 1})

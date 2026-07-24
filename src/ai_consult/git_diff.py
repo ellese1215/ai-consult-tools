@@ -20,9 +20,14 @@ from ai_consult.collection import (
     CollectionResult,
     CollectionStatus,
     ExplicitFileCollector,
+    OutputRootPathError,
 )
 from ai_consult.config import ConsultConfig, ProjectProfile
-from ai_consult.filters import FilterError, PathFilter
+from ai_consult.filters import (
+    FilterError,
+    LiteralDirectoryBoundaryFilter,
+    PathFilter,
+)
 from ai_consult.path_resolver import (
     PathResolutionError,
     RepoPathNotFoundError,
@@ -163,8 +168,9 @@ class GitDiffCollector:
         try:
             self._resolver = RepoPathResolver(repo_root)
             self._repo_root = self._resolver.repo_root
-            self._path_filter = PathFilter(
-                config.filters.exclude_paths
+            self._path_filter = PathFilter(config.filters.exclude_paths)
+            self._output_root_filter = LiteralDirectoryBoundaryFilter(
+                config.output_roots
             )
             self._file_collector = (
                 ExplicitFileCollector.from_config(
@@ -181,6 +187,7 @@ class GitDiffCollector:
         self._target_paths = _normalize_target_paths(
             target_paths,
             profile,
+            self._output_root_filter,
         )
 
     @property
@@ -590,7 +597,10 @@ class GitDiffCollector:
             if not self._is_selected(path):
                 continue
 
-            result = self._file_collector.collect_one(path)
+            try:
+                result = self._file_collector.collect_one(path)
+            except OutputRootPathError:
+                continue
 
             if not result.included:
                 skipped.append(
@@ -745,6 +755,9 @@ class GitDiffCollector:
         return results
 
     def _is_selected(self, relative_path: str) -> bool:
+        if self._output_root_filter.is_within(relative_path):
+            return False
+
         if not self._profile.contains(relative_path):
             return False
 
@@ -826,6 +839,7 @@ class GitDiffCollector:
 def _normalize_target_paths(
     values: Iterable[str],
     profile: ProjectProfile,
+    output_root_filter: LiteralDirectoryBoundaryFilter,
 ) -> tuple[str, ...]:
     candidates: list[str] = []
 
@@ -836,6 +850,14 @@ def _normalize_target_paths(
             )
 
         _validate_relative_path(value, f"target_paths[{index}]")
+
+        output_root = output_root_filter.matching_root(value)
+
+        if output_root is not None:
+            raise GitDiffError(
+                "configured output root cannot be a review target: "
+                f"{value}; outputRoot={output_root}"
+            )
 
         if not profile.contains(value):
             raise GitDiffError(

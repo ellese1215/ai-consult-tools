@@ -16,7 +16,12 @@ SRC_ROOT = TOOL_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from ai_consult.config import ConsultConfig, FilterConfig, InventoryConfig
+from ai_consult.config import (
+    ConsultConfig,
+    FilterConfig,
+    InventoryConfig,
+    parse_config,
+)
 from ai_consult.filters import PathFilter
 from ai_consult.inventory import (
     FolderTreeFormatError,
@@ -122,6 +127,48 @@ class InventoryScannerTest(unittest.TestCase):
             ).scan()
 
         self.assertEqual(snapshot.rendered_paths, ("visible.txt",))
+
+    def test_excludes_both_configured_output_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            chatgpt = repo / "artifacts" / "[chat]"
+            claude = repo / "artifacts" / "Claude 出力"
+            sibling = repo / "artifacts" / "c"
+            chatgpt.mkdir(parents=True)
+            claude.mkdir(parents=True)
+            sibling.mkdir(parents=True)
+            (chatgpt / "bundle.zip").write_bytes(b"zip")
+            (chatgpt / "bundle.zip.sha256").write_bytes(b"hash")
+            (claude / "bundle.md").write_text("bundle", encoding="utf-8")
+            (sibling / "source.txt").write_text(
+                "source",
+                encoding="utf-8",
+            )
+            (repo / "visible.txt").write_text("visible", encoding="utf-8")
+            config = parse_config(
+                {
+                    "schemaVersion": 1,
+                    "outputs": {
+                        "chatgpt": {"outRoot": "artifacts/[chat]"},
+                        "claude": {"outRoot": "artifacts/Claude 出力"},
+                    },
+                }
+            )
+
+            snapshot = InventoryScanner.from_config(repo, config).scan()
+
+        self.assertIn("visible.txt", snapshot.rendered_paths)
+        self.assertIn("artifacts/c/", snapshot.rendered_paths)
+        self.assertIn("artifacts/c/source.txt", snapshot.rendered_paths)
+        self.assertNotIn("artifacts/[chat]/", snapshot.rendered_paths)
+        self.assertNotIn("artifacts/Claude 出力/", snapshot.rendered_paths)
+        self.assertFalse(
+            any(
+                path.startswith("artifacts/[chat]/")
+                or path.startswith("artifacts/Claude 出力/")
+                for path in snapshot.rendered_paths
+            )
+        )
 
     def test_root_folder_tree_is_excluded_but_nested_name_is_kept(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

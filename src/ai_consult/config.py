@@ -213,6 +213,16 @@ class ConsultConfig:
             f"unknown include set: {name}; available: {known}"
         )
 
+    @property
+    def output_roots(self) -> tuple[str, ...]:
+        return _merge_unique_strings(
+            (),
+            (
+                self.outputs.chatgpt.out_root,
+                self.outputs.claude.out_root,
+            ),
+        )
+
 
 @dataclass(frozen=True)
 class ProjectProfile:

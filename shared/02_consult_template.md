@@ -1,8 +1,8 @@
 # AI相談用・最小テンプレート
 
 > File: `shared/02_consult_template.md`
-> Updated: 2026-07-23
-> Rules revision: 20260723-handoff-core-r6
+> Updated: 2026-07-24
+> Rules revision: 20260724-outroot-boundary-r8
 
 必要な形式を一つだけ選び、空欄と不要な項目は削除する。
 
@@ -70,7 +70,7 @@ Codexがリポジトリを読める場合はbundleを添付しない。読めな
 - Target docs / code: <対象>
 - Protected / out of scope: <対象外>
 - Open issues: <なければ「なし」>
-- Only attached artifact: <なければ「なし」>
+- Only attached artifact set: <ChatGPTはZIPと.zip.sha256の2点、なければ「なし」>
 
 ## Bundle generation command
 

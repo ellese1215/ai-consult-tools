@@ -20,8 +20,9 @@ if str(SRC_ROOT) not in sys.path:
 from ai_consult.collection import (
     CollectionStatus,
     ExplicitFileCollector,
+    OutputRootPathError,
 )
-from ai_consult.config import ConsultConfig, FilterConfig
+from ai_consult.config import ConsultConfig, FilterConfig, parse_config
 
 
 def make_config(
@@ -68,6 +69,39 @@ def make_xlsx_bytes() -> bytes:
 
 
 class ExplicitFileCollectorTest(unittest.TestCase):
+    def test_configured_output_roots_are_excluded_from_start_collection(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            paths = (
+                "artifacts/chatgpt/old/bundle.zip.sha256",
+                "artifacts/claude/old/bundle.md",
+            )
+
+            for relative_path in paths:
+                target = repo / relative_path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text("generated output", encoding="utf-8")
+
+            config = parse_config(
+                {
+                    "schemaVersion": 1,
+                    "outputs": {
+                        "chatgpt": {"outRoot": "artifacts/chatgpt"},
+                        "claude": {"outRoot": "artifacts/claude"},
+                    },
+                }
+            )
+            collector = ExplicitFileCollector.from_config(repo, config)
+            for path in paths:
+                with self.subTest(path=path):
+                    with self.assertRaisesRegex(
+                        OutputRootPathError,
+                        "configured output root cannot be collected",
+                    ):
+                        collector.collect_one(path)
+
     def test_includes_utf16_text_with_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)

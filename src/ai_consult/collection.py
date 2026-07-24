@@ -10,6 +10,7 @@ from pathlib import Path
 from ai_consult.config import ConsultConfig
 from ai_consult.filters import (
     BinaryFileError,
+    LiteralDirectoryBoundaryFilter,
     PathFilter,
     TextDecodeError,
     TextFileTooLargeError,
@@ -36,6 +37,10 @@ class CollectionStatus(str, Enum):
     DECODE_ERROR = "decode_error"
     READ_ERROR = "read_error"
     RESOLUTION_ERROR = "resolution_error"
+
+
+class OutputRootPathError(ValueError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -70,6 +75,7 @@ class ExplicitFileCollector:
         resolver: RepoPathResolver,
         path_filter: PathFilter,
         *,
+        output_root_filter: LiteralDirectoryBoundaryFilter | None = None,
         binary_extensions: Iterable[str] = (),
         max_text_bytes: int,
     ) -> None:
@@ -78,6 +84,9 @@ class ExplicitFileCollector:
 
         self._resolver = resolver
         self._path_filter = path_filter
+        self._output_root_filter = (
+            output_root_filter or LiteralDirectoryBoundaryFilter()
+        )
         self._binary_extensions = tuple(binary_extensions)
         self._max_text_bytes = max_text_bytes
 
@@ -89,8 +98,9 @@ class ExplicitFileCollector:
     ) -> ExplicitFileCollector:
         return cls(
             resolver=RepoPathResolver(repo_root),
-            path_filter=PathFilter(
-                config.filters.exclude_paths
+            path_filter=PathFilter(config.filters.exclude_paths),
+            output_root_filter=LiteralDirectoryBoundaryFilter(
+                config.output_roots
             ),
             binary_extensions=(
                 config.filters.binary_extensions
@@ -118,7 +128,7 @@ class ExplicitFileCollector:
                 requested_path,
                 must_exist=True,
                 allow_file=True,
-                allow_directory=False,
+                allow_directory=True,
             )
         except PathOutsideRepoError as exc:
             return CollectionResult(
@@ -145,6 +155,41 @@ class ExplicitFileCollector:
                 reason=str(exc),
             )
 
+        logical_output_root = self._output_root_filter.matching_root(
+            resolved.relative_path
+        )
+
+        if logical_output_root is not None:
+            raise OutputRootPathError(
+                "configured output root cannot be collected: "
+                f"{resolved.relative_path}; outputRoot={logical_output_root}"
+            )
+
+        real_relative_path = resolved.real_path.relative_to(
+            self._resolver.repo_root
+        ).as_posix()
+        real_output_root = self._output_root_filter.matching_root(
+            real_relative_path
+        )
+
+        if real_output_root is not None:
+            raise OutputRootPathError(
+                "configured output root cannot be collected through "
+                f"{resolved.relative_path}: target={real_relative_path}; "
+                f"outputRoot={real_output_root}"
+            )
+
+        if not resolved.is_file:
+            return CollectionResult(
+                requested_path=requested_text,
+                status=CollectionStatus.NOT_FILE,
+                relative_path=resolved.relative_path,
+                reason=(
+                    "directory path is not allowed here: "
+                    f"{requested_text}"
+                ),
+            )
+
         logical_pattern = self._path_filter.matching_pattern(
             resolved.relative_path
         )
@@ -159,10 +204,6 @@ class ExplicitFileCollector:
                     f"{logical_pattern}"
                 ),
             )
-
-        real_relative_path = resolved.real_path.relative_to(
-            self._resolver.repo_root
-        ).as_posix()
 
         real_pattern = self._path_filter.matching_pattern(
             real_relative_path

@@ -32,8 +32,9 @@
 | push後のlocal／remote照合 | `<comparison method>` |
 | subtree、公開remote、deployの停止条件 | `<stop conditions>` |
 | bundle生成の標準形 | `<direct consult.py start command>` |
-| folder_tree.txtの位置づけ | `<navigation aid; start regenerates and includes it without using freshness as a gate>` |
+| folder_tree.txtの位置づけ | `<persistent navigation aid; only structure sync updates it; start includes a live-snapshot-generated item without changing it>` |
 | start前の構造確認 | `<not a required gate>` |
+| ChatGPT成果物の確認 | `<read bundle_path, bundle_sha256, sidecar_path, and sidecar_match from CLI output; do not guess names>` |
 | `.Count`参照対象の配列化 | `<wrap the whole producing expression or pipeline in an array construct>` |
 | native command終了コード確認 | `<check immediately after every native command before using its output>` |
 | 単一行出力の確認 | `<arrayize, require exactly one non-empty line, then read index 0>` |
@@ -79,7 +80,9 @@ python ai-consult-tools/consult.py start --target <chatgpt|claude> --profile <na
 
 `common_rules`は、README、現行仕様、共通運用ルール、最小テンプレート、このローカル運用情報を収録する引き継ぎ用最小運用セットとして維持する。各ファイルを`--include-paths`へ重ねて指定しない。
 
-`start`は上記CLIを直接実行する。独自wrapperで事前の`structure check`、一時設定生成、`folder_tree.txt`のハッシュ不変確認、ZIP内部の再検証を追加しない。`start`による`folder_tree.txt`の再生成とbundleへの自動収録は正常な同期結果として扱う。
+`start`は上記CLIを直接実行する。独自wrapperで事前の`structure check`や一時設定生成を追加しない。永続`folder_tree.txt`と構造インデックスを更新するのは`structure sync`だけであり、`start`は両方を変更せず、live inventory snapshotから構造情報をbundle内生成する。`stale`、`missing`、`invalid`は`STRUCTURE_STATUS.md`へ報告されるが停止条件ではない。設定済みChatGPT／Claude `outRoot`はglobではないリテラルな生成物専用ディレクトリ境界であり、自身と全子孫をtarget、tracked／untrackedを問わず収集から無言で完全除外する。自動除外は`SKIPPED.md`へ記録せず、明示include／review targetは成果物生成前にエラーになる。兄弟の正規ソースの相対パスと本文、現在成果物のCLI通知は維持し、既存成果物を削除、移動、上書きしない。
+
+ChatGPTの正式成果物はZIPと`.zip.sha256`の2点である。sidecarはUTF-8 BOMなしの`<64桁の大文字SHA-256> *<ZIP basename><CRLF>`という1行で、同じディレクトリのZIPと照合する。通常wrapperはCLIの`bundle_path:`、`bundle_sha256:`、`sidecar_path:`、`sidecar_match: true`を利用し、成果物名を推測しない。Claudeにはsidecarを要求しない。
 
 ### レビュー
 

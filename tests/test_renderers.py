@@ -16,6 +16,7 @@ SRC_ROOT = TOOL_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
+import ai_consult.renderers.chatgpt as chatgpt_renderer
 from ai_consult.bundle import (
     BundleCommand,
     BundleItem,
@@ -129,6 +130,7 @@ def make_context(
     out_name: str,
     max_chars: int = 300_000,
     max_bytes: int | None = None,
+    case_name: str = "renderer_test",
 ) -> OutputContext:
     return OutputContext(
         target=target,
@@ -136,13 +138,80 @@ def make_context(
         output_root=repo / out_name,
         docset="20260711153000",
         generated_at=datetime(2026, 7, 11, 15, 30, tzinfo=JST),
-        case_name="renderer_test",
+        case_name=case_name,
         max_chars_per_part=max_chars,
         max_bytes_per_part=max_bytes,
     )
 
 
 class ChatGPTOutputAdapterTest(unittest.TestCase):
+    def assert_valid_sidecar(self, result) -> None:
+        self.assertEqual(len(result.output_paths), 2)
+        archive_path, sidecar_path = result.output_paths
+        archive_sha256 = hashlib.sha256(
+            archive_path.read_bytes()
+        ).hexdigest().upper()
+        expected = f"{archive_sha256} *{archive_path.name}\r\n".encode(
+            "utf-8"
+        )
+
+        self.assertEqual(sidecar_path.name, archive_path.name + ".sha256")
+        self.assertEqual(sidecar_path.read_bytes(), expected)
+        self.assertIs(result.bundle_path, archive_path)
+        self.assertEqual(result.bundle_sha256, archive_sha256)
+        self.assertIs(result.sidecar_path, sidecar_path)
+        self.assertIs(result.sidecar_match, True)
+
+    def assert_atomic_failure_preserves_siblings(
+        self,
+        failure_patch,
+        *,
+        expected_exception=OutputAdapterError,
+    ) -> None:
+        bundle = make_start_bundle()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            output_root = repo / "chatgpt"
+            output_root.mkdir()
+            sentinel = output_root / "keep.txt"
+            sentinel.write_bytes(b"keep")
+            previous = output_root / "previous_bundle"
+            previous.mkdir()
+            previous_archive = previous / "previous_bundle.zip"
+            previous_sidecar = previous / "previous_bundle.zip.sha256"
+            previous_archive.write_bytes(b"previous archive")
+            previous_sidecar.write_bytes(b"previous sidecar")
+            context = make_context(
+                repo,
+                OutputTarget.CHATGPT,
+                out_name="chatgpt",
+                max_bytes=1_000_000,
+            )
+            final_directory = output_root / context.bundle_label(bundle)
+
+            with failure_patch:
+                with self.assertRaises(expected_exception):
+                    write_chatgpt_bundle(bundle, context)
+
+            self.assertEqual(sentinel.read_bytes(), b"keep")
+            self.assertEqual(
+                previous_archive.read_bytes(),
+                b"previous archive",
+            )
+            self.assertEqual(
+                previous_sidecar.read_bytes(),
+                b"previous sidecar",
+            )
+            self.assertFalse(
+                final_directory.exists()
+                or final_directory.is_symlink()
+            )
+            self.assertEqual(
+                tuple(sorted(path.name for path in output_root.iterdir())),
+                ("keep.txt", "previous_bundle"),
+            )
+
     def test_writes_expected_zip_layout_and_safe_fence(self) -> None:
         source = make_text_item(
             "docs/guide.md",
@@ -159,6 +228,7 @@ class ChatGPTOutputAdapterTest(unittest.TestCase):
                 max_bytes=1_000_000,
             )
             result = write_chatgpt_bundle(bundle, context)
+            self.assert_valid_sidecar(result)
 
             with zipfile.ZipFile(result.output_paths[0]) as archive:
                 names = archive.namelist()
@@ -248,8 +318,15 @@ class ChatGPTOutputAdapterTest(unittest.TestCase):
             )
             first_bytes = first.output_paths[0].read_bytes()
             second_bytes = second.output_paths[0].read_bytes()
+            first_sidecar_hash = first.output_paths[1].read_text(
+                encoding="utf-8"
+            ).split(" ", 1)[0]
+            second_sidecar_hash = second.output_paths[1].read_text(
+                encoding="utf-8"
+            ).split(" ", 1)[0]
 
         self.assertEqual(first_bytes, second_bytes)
+        self.assertEqual(first_sidecar_hash, second_sidecar_hash)
 
     def test_splits_only_between_item_blocks(self) -> None:
         bundle = make_start_bundle(
@@ -332,13 +409,16 @@ class ChatGPTOutputAdapterTest(unittest.TestCase):
             )
             first = write_chatgpt_bundle(bundle, context)
             previous = first.output_paths[0].read_bytes()
+            previous_sidecar = first.output_paths[1].read_bytes()
 
             with self.assertRaises(OutputAdapterError):
                 write_chatgpt_bundle(bundle, context)
 
             after = first.output_paths[0].read_bytes()
+            after_sidecar = first.output_paths[1].read_bytes()
 
         self.assertEqual(after, previous)
+        self.assertEqual(after_sidecar, previous_sidecar)
 
     def test_review_zip_contains_diff_documents_and_rename_metadata(self) -> None:
         bundle = BundleModel(
@@ -370,6 +450,7 @@ class ChatGPTOutputAdapterTest(unittest.TestCase):
                     max_bytes=1_000_000,
                 ),
             )
+            self.assert_valid_sidecar(result)
 
             with zipfile.ZipFile(result.output_paths[0]) as archive:
                 names = archive.namelist()
@@ -410,6 +491,208 @@ class ChatGPTOutputAdapterTest(unittest.TestCase):
 
         self.assertEqual(leftovers, ())
 
+    def test_sidecar_write_failure_leaves_no_final_or_temp_bundle(
+        self,
+    ) -> None:
+        bundle = make_start_bundle()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            context = make_context(
+                repo,
+                OutputTarget.CHATGPT,
+                out_name="chatgpt",
+                max_bytes=1_000_000,
+            )
+
+            with patch(
+                "ai_consult.renderers.chatgpt._write_sha256_sidecar",
+                side_effect=OutputAdapterError("failed"),
+            ):
+                with self.assertRaises(OutputAdapterError):
+                    write_chatgpt_bundle(bundle, context)
+
+            leftovers = tuple((repo / "chatgpt").iterdir())
+
+        self.assertEqual(leftovers, ())
+
+    def test_sidecar_verification_failure_is_not_published(self) -> None:
+        bundle = make_start_bundle()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            context = make_context(
+                repo,
+                OutputTarget.CHATGPT,
+                out_name="chatgpt",
+                max_bytes=1_000_000,
+            )
+
+            with patch(
+                "ai_consult.renderers.chatgpt._verify_sha256_sidecar",
+                side_effect=OutputAdapterError("mismatch"),
+            ):
+                with self.assertRaises(OutputAdapterError):
+                    write_chatgpt_bundle(bundle, context)
+
+            leftovers = tuple((repo / "chatgpt").iterdir())
+
+        self.assertEqual(leftovers, ())
+
+    def test_partial_zip_write_failure_preserves_atomic_boundary(
+        self,
+    ) -> None:
+        def write_partial_then_fail(archive_path, entries) -> None:
+            del entries
+            archive_path.write_bytes(b"partial ZIP")
+            raise OutputAdapterError("ZIP write failed")
+
+        self.assert_atomic_failure_preserves_siblings(
+            patch(
+                "ai_consult.renderers.chatgpt._write_deterministic_zip",
+                side_effect=write_partial_then_fail,
+            )
+        )
+
+    def test_corrupt_zip_verification_preserves_atomic_boundary(
+        self,
+    ) -> None:
+        def write_corrupt_zip(archive_path, entries) -> None:
+            del entries
+            archive_path.write_bytes(b"not a ZIP")
+
+        self.assert_atomic_failure_preserves_siblings(
+            patch(
+                "ai_consult.renderers.chatgpt._write_deterministic_zip",
+                side_effect=write_corrupt_zip,
+            )
+        )
+
+    def test_archive_hash_failure_preserves_atomic_boundary(self) -> None:
+        self.assert_atomic_failure_preserves_siblings(
+            patch(
+                "ai_consult.renderers.chatgpt._calculate_archive_sha256",
+                side_effect=OutputAdapterError("hash failed"),
+            )
+        )
+
+    def test_sidecar_rehash_failure_preserves_atomic_boundary(self) -> None:
+        calculate_archive_sha256 = (
+            chatgpt_renderer._calculate_archive_sha256
+        )
+        call_count = 0
+
+        def fail_on_second_hash(archive_path):
+            nonlocal call_count
+            call_count += 1
+
+            if call_count == 2:
+                raise OutputAdapterError("sidecar rehash failed")
+
+            return calculate_archive_sha256(archive_path)
+
+        self.assert_atomic_failure_preserves_siblings(
+            patch(
+                "ai_consult.renderers.chatgpt._calculate_archive_sha256",
+                side_effect=fail_on_second_hash,
+            )
+        )
+        self.assertEqual(call_count, 2)
+
+    def test_partial_sidecar_write_failure_preserves_atomic_boundary(
+        self,
+    ) -> None:
+        def write_partial_then_fail(
+            sidecar_path,
+            archive_path,
+            archive_sha256,
+        ) -> None:
+            del archive_path, archive_sha256
+            sidecar_path.write_bytes(b"partial sidecar")
+            raise OutputAdapterError("sidecar write failed")
+
+        self.assert_atomic_failure_preserves_siblings(
+            patch(
+                "ai_consult.renderers.chatgpt._write_sha256_sidecar",
+                side_effect=write_partial_then_fail,
+            )
+        )
+
+    def test_sidecar_mismatch_preserves_atomic_boundary(self) -> None:
+        def write_mismatched_sidecar(
+            sidecar_path,
+            archive_path,
+            archive_sha256,
+        ) -> None:
+            del archive_path, archive_sha256
+            sidecar_path.write_bytes(
+                b"0" * 64 + b" *wrong.zip\r\n"
+            )
+
+        self.assert_atomic_failure_preserves_siblings(
+            patch(
+                "ai_consult.renderers.chatgpt._write_sha256_sidecar",
+                side_effect=write_mismatched_sidecar,
+            )
+        )
+
+    def test_publish_rename_failure_preserves_atomic_boundary(
+        self,
+    ) -> None:
+        self.assert_atomic_failure_preserves_siblings(
+            patch(
+                "ai_consult.renderers.common.Path.rename",
+                side_effect=OSError("publish failed"),
+            ),
+            expected_exception=OSError,
+        )
+
+    def test_post_publish_pair_check_removes_incomplete_bundle(
+        self,
+    ) -> None:
+        rename = Path.rename
+
+        def publish_without_sidecar(source, target):
+            result = rename(source, target)
+            sidecars = tuple(target.glob("*.zip.sha256"))
+            self.assertEqual(len(sidecars), 1)
+            sidecars[0].unlink()
+            return result
+
+        self.assert_atomic_failure_preserves_siblings(
+            patch.object(
+                Path,
+                "rename",
+                autospec=True,
+                side_effect=publish_without_sidecar,
+            )
+        )
+
+    def test_long_case_name_uses_short_fixed_temp_prefix(self) -> None:
+        bundle = make_start_bundle()
+        original_mkdtemp = tempfile.mkdtemp
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            context = make_context(
+                repo,
+                OutputTarget.CHATGPT,
+                out_name="chatgpt",
+                max_bytes=1_000_000,
+                case_name="long_" + ("x" * 120),
+            )
+
+            with patch(
+                "ai_consult.renderers.common.tempfile.mkdtemp",
+                wraps=original_mkdtemp,
+            ) as mkdtemp:
+                result = write_chatgpt_bundle(bundle, context)
+
+            self.assert_valid_sidecar(result)
+
+        self.assertEqual(mkdtemp.call_args.kwargs["prefix"], ".bundle-tmp-")
+        self.assertNotIn(context.case_name or "", mkdtemp.call_args.kwargs["prefix"])
+
 
 class ClaudeOutputAdapterTest(unittest.TestCase):
     def test_writes_split_markdown_without_placeholders(self) -> None:
@@ -434,6 +717,12 @@ class ClaudeOutputAdapterTest(unittest.TestCase):
                 path.read_text(encoding="utf-8")
                 for path in result.output_paths
             )
+            metadata = (
+                result.bundle_path,
+                result.bundle_sha256,
+                result.sidecar_path,
+                result.sidecar_match,
+            )
 
         self.assertGreater(len(names), 1)
         self.assertEqual(names[0], "20260711153000_start_renderer_test_part1.md")
@@ -448,6 +737,7 @@ class ClaudeOutputAdapterTest(unittest.TestCase):
             2,
         )
         self.assertTrue(all("\r" not in text for text in contents))
+        self.assertEqual(metadata, (None, None, None, None))
 
     def test_review_preserves_staged_and_unstaged_same_path(self) -> None:
         bundle = BundleModel(

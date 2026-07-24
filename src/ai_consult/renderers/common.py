@@ -192,6 +192,10 @@ class OutputResult:
     bundle_label: str
     bundle_directory: Path
     output_paths: tuple[Path, ...]
+    bundle_path: Path | None = None
+    bundle_sha256: str | None = None
+    sidecar_path: Path | None = None
+    sidecar_match: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -546,7 +550,7 @@ def atomic_bundle_directory(
 
     temp_directory = Path(
         tempfile.mkdtemp(
-            prefix=f".{label}.tmp-",
+            prefix=".bundle-tmp-",
             dir=context.output_root,
         )
     )

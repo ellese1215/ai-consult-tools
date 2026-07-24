@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import shutil
 import zipfile
 from pathlib import Path
 
@@ -95,15 +97,38 @@ def write_chatgpt_bundle(
         label,
     ):
         archive_path = temp_directory / f"{label}.zip"
+        sidecar_path = temp_directory / f"{label}.zip.sha256"
         _write_deterministic_zip(archive_path, entries)
         _verify_archive(archive_path, tuple(path for path, _ in entries))
+        archive_sha256 = _calculate_archive_sha256(archive_path)
+        _write_sha256_sidecar(
+            sidecar_path,
+            archive_path,
+            archive_sha256,
+        )
+        verified_sha256 = _verify_sha256_sidecar(
+            archive_path,
+            sidecar_path,
+        )
 
     final_archive = final_directory / f"{label}.zip"
+    final_sidecar = final_directory / f"{label}.zip.sha256"
+
+    if not final_archive.is_file() or not final_sidecar.is_file():
+        shutil.rmtree(final_directory, ignore_errors=True)
+        raise OutputAdapterError(
+            "ChatGPT ZIP and SHA-256 sidecar were not both published"
+        )
+
     return OutputResult(
         target=OutputTarget.CHATGPT,
         bundle_label=label,
         bundle_directory=final_directory,
-        output_paths=(final_archive,),
+        output_paths=(final_archive, final_sidecar),
+        bundle_path=final_archive,
+        bundle_sha256=verified_sha256,
+        sidecar_path=final_sidecar,
+        sidecar_match=True,
     )
 
 
@@ -270,3 +295,60 @@ def _verify_archive(
         raise OutputAdapterError(
             f"ChatGPT ZIP contains a corrupt entry: {bad_entry}"
         )
+
+
+def _calculate_archive_sha256(archive_path: Path) -> str:
+    digest = hashlib.sha256()
+
+    try:
+        with archive_path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as exc:
+        raise OutputAdapterError(
+            f"cannot hash ChatGPT ZIP: {exc}"
+        ) from exc
+
+    return digest.hexdigest().upper()
+
+
+def _sidecar_bytes(archive_path: Path, archive_sha256: str) -> bytes:
+    return (
+        f"{archive_sha256} *{archive_path.name}\r\n"
+    ).encode("utf-8")
+
+
+def _write_sha256_sidecar(
+    sidecar_path: Path,
+    archive_path: Path,
+    archive_sha256: str,
+) -> None:
+    try:
+        with sidecar_path.open("xb") as stream:
+            stream.write(_sidecar_bytes(archive_path, archive_sha256))
+    except OSError as exc:
+        raise OutputAdapterError(
+            f"cannot create ChatGPT SHA-256 sidecar: {exc}"
+        ) from exc
+
+
+def _verify_sha256_sidecar(
+    archive_path: Path,
+    sidecar_path: Path,
+) -> str:
+    archive_sha256 = _calculate_archive_sha256(archive_path)
+    expected = _sidecar_bytes(archive_path, archive_sha256)
+
+    try:
+        actual = sidecar_path.read_bytes()
+    except OSError as exc:
+        raise OutputAdapterError(
+            f"cannot verify ChatGPT SHA-256 sidecar: {exc}"
+        ) from exc
+
+    if actual != expected:
+        raise OutputAdapterError(
+            "ChatGPT SHA-256 sidecar does not match its ZIP"
+        )
+
+    return archive_sha256

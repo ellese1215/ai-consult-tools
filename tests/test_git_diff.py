@@ -20,6 +20,7 @@ from ai_consult.config import (
     ConsultConfig,
     FilterConfig,
     ProjectProfile,
+    parse_config,
 )
 from ai_consult.git_diff import (
     GitDiffCollector,
@@ -116,6 +117,158 @@ class GitRepository:
 
 
 class GitDiffCollectorTest(unittest.TestCase):
+    def test_configured_output_roots_are_excluded_from_review(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = GitRepository(Path(temp_dir))
+            repo.write_text("project/main.txt", "base\n")
+            repo.write_text("artifacts/[chat]/tracked.txt", "base\n")
+            repo.write_text("artifacts/claude/tracked.txt", "base\n")
+            repo.write_text("artifacts/c/source.txt", "base\n")
+            repo.commit_all("base")
+            repo.write_text("project/main.txt", "changed\n")
+            repo.write_text("artifacts/c/source.txt", "source changed\n")
+            repo.write_text("artifacts/[chat]/tracked.txt", "staged\n")
+            repo.git("add", "artifacts/[chat]/tracked.txt")
+            repo.write_text(
+                "artifacts/[chat]/tracked.txt",
+                "unstaged\n",
+            )
+            repo.write_text("artifacts/claude/tracked.txt", "changed\n")
+            repo.write_text("artifacts/[chat]/old/bundle.zip", "zip\n")
+            repo.write_text(
+                "artifacts/[chat]/old/bundle.zip.sha256",
+                "hash\n",
+            )
+            repo.write_text(
+                "artifacts/[chat]/temporary.v4_tmp",
+                "temporary\n",
+            )
+            repo.write_text("artifacts/claude/old_bundle.md", "output\n")
+            config = parse_config(
+                {
+                    "schemaVersion": 1,
+                    "outputs": {
+                        "chatgpt": {"outRoot": "artifacts/[chat]"},
+                        "claude": {"outRoot": "artifacts/claude"},
+                    },
+                }
+            )
+
+            bundle = collect_review_bundle(
+                repo.root,
+                config,
+                make_profile("project", "artifacts"),
+            )
+
+        self.assertEqual(
+            tuple(item.relative_path for item in bundle.items),
+            ("artifacts/c/source.txt", "project/main.txt"),
+        )
+        self.assertEqual(bundle.skipped_items, ())
+        combined = "\n".join(
+            (
+                *(item.relative_path for item in bundle.items),
+                *(item.content for item in bundle.items),
+                *(
+                    item.previous_path or ""
+                    for item in bundle.items
+                ),
+            )
+        )
+
+        for forbidden in (
+            "artifacts/[chat]",
+            "artifacts/claude",
+            "bundle.zip",
+            "bundle.zip.sha256",
+            "old_bundle.md",
+            "temporary.v4_tmp",
+        ):
+            self.assertNotIn(forbidden, combined)
+
+    def test_configured_output_root_cannot_be_an_explicit_review_target(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = GitRepository(Path(temp_dir))
+            config = parse_config(
+                {
+                    "schemaVersion": 1,
+                    "outputs": {
+                        "chatgpt": {
+                            "outRoot": "project/generated/[chat]",
+                        },
+                    },
+                }
+            )
+
+            for target in (
+                "project/generated/[chat]",
+                "project/generated/[chat]/old.zip",
+            ):
+                with self.subTest(target=target):
+                    with self.assertRaisesRegex(
+                        GitDiffError,
+                        "cannot be a review target",
+                    ):
+                        GitDiffCollector(
+                            repo.root,
+                            config,
+                            make_profile("project"),
+                            target_paths=(target,),
+                        )
+
+    def test_renames_across_output_root_boundary_hide_output_paths(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = GitRepository(Path(temp_dir))
+            repo.write_text("project/to_output.txt", "to output\n")
+            repo.write_text(
+                "project/generated/[chat]/to_source.txt",
+                "to source\n",
+            )
+            repo.commit_all("base")
+            repo.git(
+                "mv",
+                "project/to_output.txt",
+                "project/generated/[chat]/from_source.txt",
+            )
+            repo.git(
+                "mv",
+                "project/generated/[chat]/to_source.txt",
+                "project/from_output.txt",
+            )
+            config = parse_config(
+                {
+                    "schemaVersion": 1,
+                    "outputs": {
+                        "chatgpt": {
+                            "outRoot": "project/generated/[chat]",
+                        },
+                    },
+                }
+            )
+
+            snapshot = GitDiffCollector(
+                repo.root,
+                config,
+                make_profile("project"),
+            ).collect()
+
+        self.assertEqual(
+            tuple(item.relative_path for item in snapshot.staged_items),
+            ("project/from_output.txt", "project/to_output.txt"),
+        )
+        self.assertEqual(snapshot.skipped_items, ())
+        combined = "\n".join(
+            (
+                *(item.relative_path for item in snapshot.items),
+                *(item.content for item in snapshot.items),
+            )
+        )
+        self.assertNotIn("project/generated/[chat]", combined)
+
     def test_collects_staged_unstaged_and_untracked_separately(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repo = GitRepository(Path(temp_dir))

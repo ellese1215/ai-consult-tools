@@ -169,6 +169,62 @@ def _matches_pattern(relative_path: str, pattern: str) -> bool:
     return relative_folded == pattern_folded
 
 
+class LiteralDirectoryBoundaryFilter:
+    def __init__(self, directory_roots: Iterable[str] = ()) -> None:
+        roots: list[str] = []
+        seen: set[str] = set()
+
+        for value in directory_roots:
+            normalized = normalize_relative_path(value)
+
+            if not normalized:
+                raise FilterError(
+                    "literal directory root must not be empty"
+                )
+
+            folded = normalized.casefold()
+
+            if folded in seen:
+                continue
+
+            seen.add(folded)
+            roots.append(normalized)
+
+        self._directory_roots = tuple(roots)
+
+    @property
+    def directory_roots(self) -> tuple[str, ...]:
+        return self._directory_roots
+
+    def matching_root(
+        self,
+        relative_path: str | Path,
+    ) -> str | None:
+        normalized = normalize_relative_path(relative_path)
+
+        if not normalized:
+            return None
+
+        folded = normalized.casefold()
+
+        for root in self._directory_roots:
+            root_folded = root.casefold()
+
+            if (
+                folded == root_folded
+                or folded.startswith(root_folded + "/")
+            ):
+                return root
+
+        return None
+
+    def is_within(
+        self,
+        relative_path: str | Path,
+    ) -> bool:
+        return self.matching_root(relative_path) is not None
+
+
 class PathFilter:
     def __init__(self, exclude_patterns: Iterable[str] = ()) -> None:
         self._exclude_patterns = tuple(

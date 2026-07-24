@@ -1,7 +1,7 @@
 # SECURITY.md
 
 > File: `shared/SECURITY.md`
-> Updated: 2026-07-11
+> Updated: 2026-07-24
 > Status: AI相談運用基盤v4
 
 ## 1. この文書の役割
@@ -48,6 +48,10 @@ bundle生成前と外部共有前に、人が対象と内容を確認する。
 | `inventory.excludePaths` | 構造走査から追加除外する |
 
 構造にも本文にも出したくないパスは、必要に応じて両方へ指定する。
+
+`outputs.chatgpt.outRoot`と`outputs.claude.outRoot`の実設定値は生成物専用領域である。既定値か任意値か、現在のtarget、tracked／untrackedを問わず、各outRoot自体と全子孫を列挙、読込、hash計算、構造資料、bundle、`MANIFEST.csv`、`SKIPPED.md`から無言で完全除外する。outRootはglobではなく、`[`などを文字として扱うリテラルなディレクトリ境界であり、一般の`excludePaths`とは別に判定する。兄弟の正規ソースは相対パスと本文を維持する。
+
+outRootまたは子孫の明示include／review targetは正式成果物を作らずエラーにする。現在生成した成果物を受け取るためのCLI通知は維持するが、そのパスを後続bundleへ継承しない。ツールは出力先配下の過去bundle、ZIP、sidecar、Claude Markdown、一時ディレクトリを収録せず、削除、移動、上書きもしない。この自動除外はほかの機密情報除外を置き換えない。
 
 ```json
 {
@@ -106,11 +110,12 @@ ai-consult-tools/local/cache/
 
 ## 6. 生成物
 
-ChatGPT ZIPとClaude Markdownは、収録したソース、差分、manifest、ローカル情報を含む場合がある。
+ChatGPT ZIPとその`.zip.sha256` sidecar、Claude Markdownは正式成果物である。ZIPとClaude Markdownは、収録したソース、差分、manifest、ローカル情報を含む場合がある。sidecarはZIPの大文字SHA-256とbasenameだけを記録し、絶対パスやほかのファイルを列挙しない。
 
 - `consult_case/`をGit管理しない
 - 公開リポジトリや共有ストレージへ無条件に置かない
 - 外部共有前に`INDEX.md`、`PATH_INDEX.md`または`DIFF_INDEX.md`、`SKIPPED.md`、`MANIFEST.csv`を確認する
+- ChatGPT成果物はZIPとsidecarを同じディレクトリの一組として扱い、`<64桁の大文字SHA-256> *<ZIP basename><CRLF>`の形式とZIP hashの一致を確認する
 - 不要な生成物は、必要なレビューと記録が終わった後に削除できる
 - bundleを恒久的な仕様正本として保管しない
 

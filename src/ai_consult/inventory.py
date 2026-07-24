@@ -9,7 +9,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from ai_consult.config import ConsultConfig
-from ai_consult.filters import PathFilter
+from ai_consult.filters import LiteralDirectoryBoundaryFilter, PathFilter
 from ai_consult.path_resolver import RepoPathResolver
 
 
@@ -91,6 +91,7 @@ class InventoryEntry:
 class InventorySnapshot:
     repo_root: Path
     entries: tuple[InventoryEntry, ...]
+    output_roots: tuple[str, ...] = ()
 
     @property
     def rendered_paths(self) -> tuple[str, ...]:
@@ -178,9 +179,13 @@ class InventoryScanner:
         self,
         repo_root: str | Path,
         path_filter: PathFilter,
+        output_root_filter: LiteralDirectoryBoundaryFilter | None = None,
     ) -> None:
         self._repo_root = RepoPathResolver(repo_root).repo_root
         self._path_filter = path_filter
+        self._output_root_filter = (
+            output_root_filter or LiteralDirectoryBoundaryFilter()
+        )
 
     @classmethod
     def from_config(
@@ -191,6 +196,7 @@ class InventoryScanner:
         return cls(
             repo_root,
             PathFilter(config.inventory.exclude_paths),
+            LiteralDirectoryBoundaryFilter(config.output_roots),
         )
 
     @property
@@ -205,6 +211,7 @@ class InventoryScanner:
         return InventorySnapshot(
             repo_root=self._repo_root,
             entries=tuple(entries),
+            output_roots=self._output_root_filter.directory_roots,
         )
 
     def _scan_directory(
@@ -247,6 +254,9 @@ class InventoryScanner:
             ) from exc
 
         if relative_path in GENERATED_STRUCTURE_PATHS:
+            return
+
+        if self._output_root_filter.is_within(relative_path):
             return
 
         if self._path_filter.is_excluded(relative_path):
@@ -753,12 +763,21 @@ def compare_folder_tree(
             format_error=str(exc),
         )
 
+    output_root_filter = LiteralDirectoryBoundaryFilter(
+        snapshot.output_roots
+    )
+    visible_previous_paths = tuple(
+        path
+        for path in previous_paths
+        if not output_root_filter.is_within(path)
+    )
+
     return FolderTreeComparison(
         folder_tree_path=target,
         is_current=False,
         previous_exists=True,
         diff=build_structure_diff(
-            previous_paths,
+            visible_previous_paths,
             snapshot.rendered_paths,
         ),
     )
